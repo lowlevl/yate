@@ -44,6 +44,11 @@ extern "C" {
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <dlfcn.h>
+#include <cassert>
+
+#define PATH_SEP "/"
 
 using namespace TelEngine;
 namespace { // anonymous
@@ -529,6 +534,7 @@ public:
     virtual bool process();
     // Called by the factory to create Zaptel interfaces or spans
     static SignallingComponent* create(const String& type, NamedList& name);
+    static int findSpanOffset(const String& name);
 protected:
     // Check if received any data in the last interval. Notify receiver
     virtual void timerTick(const Time& when);
@@ -1688,6 +1694,57 @@ ZapInterface::~ZapInterface()
     XDebug(this,DebugAll,"ZapInterface::~ZapInterface() [%p]",this);
 }
 
+int ZapInterface::findSpanOffset(const String& name)
+{
+    int offset = -1;
+
+    String path = "/sys/bus/dahdi_spans/devices";
+    DIR *dir = ::opendir(path);
+    if (!dir)
+        return 0;
+
+    struct dirent* entry;
+    while ((entry = ::readdir(dir)) != 0) {
+        if (entry->d_name[0] == '.')
+            continue;
+
+        struct stat stat_buf;
+        if (::stat(path + PATH_SEP + entry->d_name,&stat_buf))
+            continue;
+
+        String name_filename = path + PATH_SEP + entry->d_name + PATH_SEP + "name";
+        int name_fd = ::open(name_filename.c_str(), O_RDONLY);
+        if (name_fd >= 0) {
+            char buf[128];
+            int tmp = ::read(name_fd,buf,sizeof(buf));
+            if (tmp > 0) {
+                // last character of the name is a \n, let's skip that.
+                buf[tmp - 1] = 0x00;
+
+                if (String(buf) == name)
+                {
+                        String basechan_filename = path + PATH_SEP + entry->d_name + PATH_SEP + "basechan";
+                        int basechan_fd = ::open(basechan_filename.c_str(), O_RDONLY);
+                        if (basechan_fd >= 0) {
+                            char buf[128];
+                            int tmp = ::read(basechan_fd,buf,sizeof(buf));
+                            if (tmp > 0) {
+                                // last character of the basechan is a \n, let's skip that.
+                                buf[tmp - 1] = 0x00;
+                                offset = String(buf).toInteger() - 1;
+                            }
+                            ::close(basechan_fd);
+                        }
+                }
+            }
+            ::close(name_fd);
+        }
+    }
+    ::closedir(dir);
+    return offset;
+}
+
+
 // Called by the factory to create Zaptel interfaces or spans
 SignallingComponent* ZapInterface::create(const String& type, NamedList& name)
 {
@@ -1731,8 +1788,31 @@ SignallingComponent* ZapInterface::create(const String& type, NamedList& name)
     if (!general)
 	general = &dummy;
 
-    String sOffset = config->getValue("offset");
-    unsigned int offset = (unsigned int)sOffset.toInteger(-1);
+    String sSpan = config->getValue("span");
+    int span_offset = -1;
+    unsigned int offset = 0;
+    String sOffset;
+
+    if (sSpan)
+    {
+        span_offset = findSpanOffset(sSpan);
+        if (span_offset >= 0)
+        {
+                Debug(&plugin,DebugWarn,"found span offset: %d for span %s", findSpanOffset(sSpan), sSpan.c_str());
+                offset = span_offset;
+        }
+        else
+        {
+                Debug(&plugin,DebugWarn,"Couldn't determine span offset %s from DAHDI", sSpan.c_str());
+                return 0;
+        }
+    }
+    else
+    {
+        sOffset = config->getValue("offset");
+        offset = (unsigned int)sOffset.toInteger(-1);
+    }
+
     if (offset == (unsigned int)-1) {
 	Debug(&plugin,DebugWarn,"Section '%s'. Invalid offset='%s'",
 	    config->c_str(),sOffset.safe());
