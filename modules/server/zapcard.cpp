@@ -1120,6 +1120,17 @@ bool ZapDevice::open(unsigned int numbufs, unsigned int bufsize)
 		break;
 	    DDebug(m_owner,DebugAll,"%sBlock size set to %u on channel %u [%p]",
 		m_name.safe(),bufsize,m_channel,m_owner);
+
+            // B channels can use the WHEN_FULL policy (higher latency, less/no loss)
+            struct dahdi_bufferinfo bi;
+            bi.txbufpolicy = DAHDI_POLICY_WHEN_FULL;
+            bi.rxbufpolicy = DAHDI_POLICY_WHEN_FULL;
+            bi.numbufs = numbufs;
+            bi.bufsize = bufsize;
+            if (ioctl(SetBuffers,&bi))
+                DDebug(m_owner,DebugNote,"%snumbufs=%u bufsize=%u on channel %u [%p]",
+                    m_name.safe(),numbufs,bufsize,m_channel,m_owner);
+
 	    return true;
 	}
 
@@ -1133,6 +1144,7 @@ bool ZapDevice::open(unsigned int numbufs, unsigned int bufsize)
 	}
 	// Set buffers
 	struct dahdi_bufferinfo bi;
+	// D channel needs to be run in IMMEDIATE mode
 	bi.txbufpolicy = DAHDI_POLICY_IMMEDIATE;
 	bi.rxbufpolicy = DAHDI_POLICY_IMMEDIATE;
 	bi.numbufs = numbufs;
@@ -1678,7 +1690,7 @@ ZapInterface::ZapInterface(const NamedList& params)
       m_device(ZapDevice::DChan,this,0,0),
       m_priority(Thread::Normal),
       m_errorMask(255),
-      m_numbufs(16), m_bufsize(1024), m_buffer(0),
+      m_numbufs(4), m_bufsize(512), m_buffer(0),
       m_readOnly(false), m_sendReadOnly(false),
       m_notify(0),
       m_timerRxUnder(0)
@@ -2229,9 +2241,9 @@ ZapCircuit::ZapCircuit(ZapDevice::Type type, unsigned int code, unsigned int cha
     tmp = (unsigned int)config.getIntValue("echotrain",defaults.getIntValue("echotrain",400));
     m_echoTrain = tmp >= 0 ? tmp : 0;
     m_canSend = !getBoolValue("readonly",config,defaults,params);
-    m_buflen = (unsigned int)config.getIntValue("buflen",defaults.getIntValue("buflen",160));
+    m_buflen = (unsigned int)config.getIntValue("buflen",defaults.getIntValue("buflen",128));
     if (!m_buflen)
-	m_buflen = 160;
+	m_buflen = 128;
     m_consBufMax = m_buflen * 4;
     m_sourceBuffer.assign(0,m_buflen);
     m_idleValue = defaults.getIntValue("idlevalue",0xff);
