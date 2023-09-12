@@ -1696,7 +1696,7 @@ ZapInterface::ZapInterface(const NamedList& params)
       m_device(ZapDevice::DChan,this,0,0),
       m_priority(Thread::Normal),
       m_errorMask(255),
-      m_numbufs(4), m_bufsize(512), m_buffer(0),
+      m_numbufs(16), m_bufsize(1024), m_buffer(0),
       m_readOnly(false), m_sendReadOnly(false),
       m_notify(0),
       m_timerRxUnder(0)
@@ -2247,9 +2247,9 @@ ZapCircuit::ZapCircuit(ZapDevice::Type type, unsigned int code, unsigned int cha
     tmp = (unsigned int)config.getIntValue("echotrain",defaults.getIntValue("echotrain",400));
     m_echoTrain = tmp >= 0 ? tmp : 0;
     m_canSend = !getBoolValue("readonly",config,defaults,params);
-    m_buflen = (unsigned int)config.getIntValue("buflen",defaults.getIntValue("buflen",128));
+    m_buflen = (unsigned int)config.getIntValue("buflen",defaults.getIntValue("buflen",160));
     if (!m_buflen)
-	m_buflen = 128;
+	m_buflen = 160;
     m_consBufMax = m_buflen * 4;
     m_sourceBuffer.assign(0,m_buflen);
     m_idleValue = defaults.getIntValue("idlevalue",0xff);
