@@ -1665,9 +1665,21 @@ bool ISDNQ931Call::sendSetup(SignallingMessage* sigMsg)
 	m_data.m_transferCapability = sigMsg->params().getValue(YSTRING("transfer-cap"), "speech");
 	m_data.m_transferMode = "circuit";
 	m_data.m_transferRate = "64kbit";
-	m_data.m_format = sigMsg->params().getValue(YSTRING("format"),q931()->format());
-	if (0xffff == lookup(m_data.m_format,Q931Parser::s_dict_bearerProto1,0xffff))
-	    m_data.m_format = "alaw";
+
+	const char *formats = sigMsg->params().getValue(YSTRING("formats"), "");
+
+	if (formats && strcmp(formats, "clearmode") == 0)
+	{
+		m_data.m_format = "clearmode";
+		m_data.m_transferCapability = "udi";
+	}
+	else
+	{
+		m_data.m_format = sigMsg->params().getValue(YSTRING("format"),q931()->format());
+		if (0xffff == lookup(m_data.m_format,Q931Parser::s_dict_bearerProto1,0xffff))
+			m_data.m_format = "alaw";
+	}
+
 	m_data.processBearerCaps(msg,true);
 	// ChannelID
 	if (!m_circuit)

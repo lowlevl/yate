@@ -549,6 +549,9 @@
 ; alaw: bool: Companded-only G711 a-law (PCMU/8000)
 ;alaw=default
 
+; clearmode: bool: Transparent 64kbit/s B channel (RFC4040)
+;clearmode=default
+
 ; gsm: bool: European GSM 06.10 (GSM/8000)
 ;gsm=default
 
