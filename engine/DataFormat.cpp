@@ -44,6 +44,7 @@ static const FormatInfo s_formats[] = {
     FormatInfo("ilbc30", 50, 30000),
 //    FormatInfo("speex", 0),
     FormatInfo("g729", 10, 10000),
+    FormatInfo("clearmode", 80, 20000, "data", 0, 1, false),
     FormatInfo("plain", 0, 0, "text", 0),
     FormatInfo("raw", 0, 0, "data", 0),
 };
