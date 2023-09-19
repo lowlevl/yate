@@ -981,10 +981,11 @@ static TokenDict s_types[] = {
 #undef MAKE_NAME
 
 static TokenDict s_formats[] = {
-    {"slin",    ZapDevice::Slin},
-    {"default", ZapDevice::Default},
-    {"mulaw",   ZapDevice::Mulaw},
-    {"alaw",    ZapDevice::Alaw},
+    {"slin",         ZapDevice::Slin},
+    {"default",      ZapDevice::Default},
+    {"mulaw",        ZapDevice::Mulaw},
+    {"alaw",         ZapDevice::Alaw},
+    {"clearmode",    ZapDevice::Alaw},
     {0,0}
     };
 #ifdef HAVE_ZAP

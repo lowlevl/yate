@@ -37,6 +37,7 @@ static Rfc2833 s_rfc2833;
 const TokenDict SDPParser::s_payloads[] = {
     { "mulaw",         0 },
     { "alaw",          8 },
+    { "clearmode",    97 },
     { "gsm",           3 },
     { "lpc10",         7 },
     { "2*slin",       10 },
@@ -99,6 +100,7 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { "MPA/90000",         14 },
     { "iLBC/8000",         98 },
     { "AMR/8000",          96 },
+    { "CLEARMODE/8000",    97 },
     { "AMR-WB/16000",      99 },
     { "SPEEX/8000",       102 },
     { "SPEEX/16000",      103 },

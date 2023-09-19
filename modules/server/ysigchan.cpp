@@ -1225,6 +1225,7 @@ bool SigChannel::startCall(Message& msg, SigTrunk* trunk)
     sigMsg->params().addParam("callername",msg.getValue("callername"));
     sigMsg->params().copyParam(msg,"circuits");
     sigMsg->params().copyParam(msg,"format");
+    sigMsg->params().copyParam(msg,"formats");
     sigMsg->params().copyParam(msg,"callernumtype");
     sigMsg->params().copyParam(msg,"callernumplan");
     if (msg.getValue("privacy") && msg.getBoolValue("privacy",true))
