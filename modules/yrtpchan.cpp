@@ -38,6 +38,7 @@ namespace { // anonymous
 static TokenDict dict_payloads[] = {
     { "mulaw",         0 },
     { "alaw",          8 },
+    { "clearmode",     97 },
     { "gsm",           3 },
     { "lpc10",         7 },
     { "2*slin",       10 },
