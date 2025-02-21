@@ -1300,7 +1300,9 @@ void ModuleGroup::buildGroup(ModuleGroup* group, ObjList& spanList, String& erro
 	String* s = static_cast<String*>(o->get());
 	if (s->null())
 	    continue;
-	SignallingCircuitSpan* span = buildSpan(*s,start);
+	NamedList spanParams(*s);
+	spanParams.addParam("local-config","true");
+	SignallingCircuitSpan* span = buildSpan(*s,start,&spanParams);
 	if (!span) {
 	    error << "Failed to build span '" << *s << "'";
 	    break;
