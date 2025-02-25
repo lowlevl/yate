@@ -1246,10 +1246,8 @@ fi
 if [[ "x$ac_cv_use_spandsp" != "xno" ]]; then
 AC_MSG_CHECKING([for usable spandsp in $ac_cv_use_spandsp])
 if [[ -f "$ac_cv_use_spandsp/spandsp.h" ]]; then
-AC_LANG_SAVE
-AC_LANG([C++])
 SAVE_CFLAGS="$CFLAGS"
-CFLAGS="$CFLAGS -Wall -Werror"
+CFLAGS="$CFLAGS -Wall -Werror -I$ac_cv_use_spandsp"
 AC_TRY_COMPILE([
 #define __STDC_LIMIT_MACROS
 #define SPANDSP_EXPOSE_INTERNAL_STRUCTURES
@@ -1337,7 +1335,6 @@ fi
 fi
 fi
 CFLAGS="$SAVE_CFLAGS"
-AC_LANG_RESTORE
 fi
 AC_MSG_RESULT([$HAVE_SPANDSP])
 fi
