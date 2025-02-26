@@ -180,6 +180,20 @@ class ZapModule;                         // The module
 #define DAHDI_TONE_DTMF_C	ZT_TONE_DTMF_C
 #define DAHDI_TONE_DTMF_D	ZT_TONE_DTMF_D
 
+// tones
+#define DAHDI_TONE_STOP		ZT_TONE_STOP
+#define DAHDI_TONE_DIALTONE	ZT_TONE_DIALTONE
+#define DAHDI_TONE_BUSY		ZT_TONE_BUSY
+#define DAHDI_TONE_RINGTONE	ZT_TONE_RINGTONE
+#define DAHDI_TONE_CONGESTION	ZT_TONE_CONGESTION
+#define DAHDI_TONE_CALLWAIT	ZT_TONE_CALLWAIT
+#define DAHDI_TONE_DIALRECALL	ZT_TONE_DIALRECALL
+#define DAHDI_TONE_RECORDTONE	ZT_TONE_RECORDTONE
+#define DAHDI_TONE_INFO		ZT_TONE_INFO
+#define DAHDI_TONE_CUST1	ZT_TONE_CUST1
+#define DAHDI_TONE_CUST2	ZT_TONE_CUST2
+#define DAHDI_TONE_STUTTER	ZT_TONE_STUTTER
+
 // ioctl operations
 #define DAHDI_SIG_EM		ZT_SIG_EM
 #define DAHDI_GETEVENT		ZT_GETEVENT
@@ -447,6 +461,8 @@ public:
 	bool allDigits = true, bool useTone = false);
     // Send DTMF event using tone structure
     bool sendDtmf(char tone);
+    // Send tone event using tone name
+    bool sendTone(const String* tone);
     // Get an event. Return 0 if no events. Set digit if the event is a DTMF/PULSE
     int getEvent(char& digit);
     // Check alarms from this device. Return true if alarms changed
@@ -1377,6 +1393,40 @@ bool ZapDevice::sendDtmf(char tone)
 	m_name.safe(),tone,zapTones[zapTone],m_channel,this);
     return ioctl(ZapDevice::SendTone,&zapTones[zapTone],DebugMild);
 #undef YZAP_TONES
+}
+
+// Send tone event using tone name
+bool ZapDevice::sendTone(const String* tone)
+{
+    int selected = DAHDI_TONE_STOP;
+
+    if (!tone) {
+	;
+    } else if (*tone == YSTRING("dial") || *tone == YSTRING("dt")) {
+	selected = DAHDI_TONE_DIALTONE;
+    } else if (*tone == YSTRING("busy") || *tone == YSTRING("bt")) {
+	selected = DAHDI_TONE_BUSY;
+    } else if (*tone == YSTRING("ringback") || *tone == YSTRING("ring") || *tone == YSTRING("rt")) {
+	selected = DAHDI_TONE_RINGTONE;
+    } else if (*tone == YSTRING("congestion") || *tone == YSTRING("cg")) {
+	selected = DAHDI_TONE_CONGESTION;
+    } else if (*tone == YSTRING("callwaiting") || *tone == YSTRING("cw")) {
+	selected = DAHDI_TONE_CALLWAIT;
+    } else if (*tone == YSTRING("dialrecall")) {
+	selected = DAHDI_TONE_DIALRECALL;
+    } else if (*tone == YSTRING("record")) {
+	selected = DAHDI_TONE_RECORDTONE;
+    } else if (*tone == YSTRING("info") || *tone == YSTRING("in")) {
+	selected = DAHDI_TONE_INFO;
+    } else if (*tone == YSTRING("cust1")) {
+	selected = DAHDI_TONE_CUST1;
+    } else if (*tone == YSTRING("cust2")) {
+	selected = DAHDI_TONE_CUST2;
+    } else if (*tone == YSTRING("stutter")) {
+	selected = DAHDI_TONE_STUTTER;
+    }
+
+    return ioctl(ZapDevice::SendTone,&selected,DebugMild);
 }
 
 // Get an event. Return 0 if no events. Set digit if the event is a DTMF/PULSE digit
@@ -2608,6 +2658,16 @@ bool ZapCircuit::sendEvent(SignallingCircuitEvent::Type type, NamedList* params)
 	if (dial)
 	    return m_device.sendDtmf(tones,dtmf,ZapDevice::DialReplace,true,false);
 	return m_device.sendDtmf(tones,dtmf,ZapDevice::DialAppend,false,true);
+    }
+
+    if (type == SignallingCircuitEvent::GenericTone) {
+	const String* tone = 0;
+	if (params) {
+	    tone = params->getParam(YSTRING("tone"));
+	    if (!tone)
+		tone = params;
+	}
+	return m_device.sendTone(tone);
     }
 
     Debug(group(),DebugNote,"ZapCircuit(%u). Unable to send unknown event %u [%p]",
