@@ -3109,8 +3109,8 @@ bool AnalogDriver::chanNotify(Message& msg)
 
     // Check if the notification is for a channel
     if (-1 != target.toInteger(-1)) {
-	Debug(this,DebugStub,"Ignoring chan.notify with target=%s",msg.getValue("targetid"));
-	return true;
+	Debug(this,DebugAll,"Ignoring chan.notify with target=%s",msg.getValue("targetid"));
+	return false;
     }
 
     // Notify lines
