@@ -1186,6 +1186,34 @@ template <class Obj> void yateSort(Obj* buf, unsigned int len,
     }
 }
 
+/**
+ * Sort a vector
+ * Held object MUST implement the assignment and inequality operators
+ * @param buf Pointer to buffer
+ * @param len Buffer length
+ * @param asc True to sort in ascending order, false to sort in descending order
+ */
+template <class Obj> void yateSortVal(Obj* buf, unsigned int len, bool asc)
+{
+    if (!buf)
+	return;
+    while (len > 1) {
+	unsigned int n = len;
+	len = 0;
+        for (unsigned int i = 1; i < n; ++i) {
+	    if (asc) {
+		if (buf[i - 1] <= buf[i])
+		    continue;
+	    }
+	    else if (buf[i - 1] >= buf[i])
+		continue;
+	    Obj tmp = buf[i - 1];
+	    buf[i - 1] = buf[i];
+	    buf[i] = tmp;
+	    len = i;
+	}
+    }
+}
 
 #undef YATOMIC_BUILTIN
 #define YATOMIC_LOCK
@@ -7375,6 +7403,608 @@ private:
     unsigned int m_allocated;
     unsigned int m_overAlloc;
 };
+
+/**
+ * Base class for for template generic object vector holding basic C numeric types
+ * @short Base class for template generic object vector holding basic C numeric types
+ */
+class YATE_API BaseNumVector : protected DataBlock
+{
+    YCLASS(BaseNumVector,DataBlock);
+public:
+    /**
+     * Flags used by methods
+     */
+    enum Flags {
+	Unique = 0x0001,                 // Unique values. Used by parse from string
+	NoZero = 0x0002,                 // Do not allow zero. Used by parse from string
+	Range = 0x0004,                  // Allow range. Used by parse from string
+	Clamp = 0x0008,                  // Clamp values. Used by parse from string
+	// Masks
+	ParseList = Unique | Clamp,      // Default value for parse
+    };
+
+    /**
+     * Constructor
+     * @param overAllocBytes How many items to over allocate in bytes
+     */
+    inline BaseNumVector(unsigned int overAllocBytes = 0)
+	: DataBlock(overAllocBytes), m_length(0)
+	{}
+
+    /**
+     * Retrieve vector length
+     * @return Vector length
+     */
+    inline unsigned int length() const
+	{ return m_length; }
+
+protected:
+    unsigned int m_length;               // Vector length
+};
+
+/**
+ * Template for generic object vector holding basic C numeric types
+ * @short Template for generic object vector holding basic C numeric types
+ */
+template <class Type> class BaseNumVectorTemplate : public BaseNumVector
+{
+public:
+    /**
+     * Constructor
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{}
+
+    /**
+     * Constructor
+     * @param buf Pointer to initial values
+     * @param len Initial length
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(const Type* buf, unsigned int len,
+	unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{ assign(buf,len); }
+
+    /**
+     * Constructor
+     * @param val Fill vector with value
+     * @param len Initial length
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(Type val, unsigned int len, unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{ assign(val,len); }
+
+    /**
+     * Copy constructor
+     * @param other Vector to copy
+     */
+    inline BaseNumVectorTemplate(const BaseNumVectorTemplate& other)
+	{ *this = other; }
+
+    /**
+     * Destructor
+     */
+    virtual ~BaseNumVectorTemplate()
+	{ clear(); }
+
+    /**
+     * Retrieve vector size (total allocated items, including over alloc)
+     * @return Vector size
+     */
+    inline unsigned int size() const
+	{ return items(DataBlock::size()); }
+
+    /**
+     * Retrieve the over alloc value
+     * @return Over alloc value
+     */
+    inline unsigned int overAlloc() const
+	{ return items(DataBlock::overAlloc()); }
+
+    /**
+     * Set over alloc length
+     * @param count Value of over alloc length
+     */
+    inline void overAlloc(unsigned int count)
+	{ DataBlock::overAlloc(bytes(count)); }
+
+    /**
+     * Retrieve a pointer to data
+     * @return Type pointer, NULL if data not set
+     */
+    inline Type* data()
+	{ return (Type*)DataBlock::data(); }
+
+    /**
+     * Retrieve a pointer to data
+     * @return Type pointer, NULL if data not set
+     */
+    inline const Type* data() const
+	{ return (Type*)DataBlock::data(); }
+
+    /**
+     * Retrieve a pointer to data starting at offset
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve. Negative for all
+     * @return Type pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline Type* data(unsigned int offs, int count = -1)
+	{ return available(offs,count) ? (data() + offs) : 0; }
+
+    /**
+     * Retrieve a pointer to data
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve. Negative for all
+     * @return Type pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline const Type* data(unsigned int offs, int count = -1) const
+	{ return available(offs,count) ? (data() + offs) : 0; }
+
+    /**
+     * Retrive the number of items available from offset
+     * @param offs Index to start
+     * @param count Number of items to retrieve. Negative for all
+     * @return The number of items available from offset
+     */
+    inline unsigned int available(unsigned int offs, int count = -1) const {
+	    if (offs >= length())
+		return 0;
+	    int n = length() - offs;
+	    return count < 0 || count > n ? n : count;
+	}
+
+    /**
+     * Retrieve value at index
+     * @param idx Vector index to retrieve
+     * @return Value at index, 0 if out of bounds
+     */
+    inline Type at(unsigned int idx) const
+	{ return idx < length() ? data()[idx] : (Type)0; }
+
+    /**
+     * Retrieve index of object by value
+     * @param val Object value
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOf(Type val) const
+	{ return bufIndexOf(val,data(),length()); }
+
+    /**
+     * Retrieve index of object by value
+     * @param val Object value
+     * @param offs Index to start
+     * @param len Number of items to check starting at offset. Negative for all
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOf(Type val, unsigned int offs, int len = -1) const
+	{ return bufIndexOf(val,data() + offs,available(offs,len)); }
+
+    /**
+     * Check if a value exists in vector
+     * @param val Value to search for
+     * @return True if found, false otherwise
+     */
+    inline bool includes(Type val) const
+	{ return indexOf(val) >= 0; }
+
+    /**
+     * Check if a value exists in vector
+     * @param val Value to search for
+     * @param offs Index to start
+     * @param len Number of items to check starting at offset. Negative for all
+     * @return True if found, false otherwise
+     */
+    inline int includes(Type val, unsigned int offs, int len = -1) const
+	{ return indexOf(val,offs,len) >= 0; }
+
+    /**
+     * Clear data
+     */
+    inline void clear() {
+	    DataBlock::clear();
+	    m_length = 0;
+	}
+
+    /**
+     * Resize the vector
+     * @param len New vector length. Clear if 0
+     * @param keepData Keep old data This parameter is ignored if data is cleared
+     * @param reAlloc Re-allocate vector. Set it to false to move/reset data only.
+     *  This parameter is ignored if data is cleared
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool resize(unsigned int len, bool keepData = true, bool reAlloc = true) {
+	    unsigned int old = m_length;
+	    DataBlock::resize(bytes(len),keepData,reAlloc);
+	    changed();
+	    return old == m_length;
+	}
+
+    /**
+     * Change the current block. Insert or append data
+     * @param pos Buffer position, append at end if past buffer end
+     * @param buf Data to copy
+     * @param len Data length, ignored if 'buf' is NULL
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool change(unsigned int pos, const Type* buf, unsigned int len) {
+	    bool ok = DataBlock::change(bytes(pos),buf,bytes(len));
+	    changed();
+	    return ok;
+	}
+
+    /**
+     * Assign new data
+     * @param buf Data to assign, may be NULL to fill with zeros
+     * @param len Length of data, may be zero (then value is ignored)
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(const Type* buf, unsigned int len) {
+	    unsigned int old = m_length;
+	    DataBlock::assign((void*)buf,bytes(len));
+	    changed();
+	    return old == m_length;
+	}
+
+    /**
+     * Assign new data
+     * @param val Value to fill with
+     * @param len Length of data
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(Type val, unsigned int len) {
+	    if (!val)
+		return assign((const Type*)0,len);
+	    if (!resize(len))
+		return false;
+	    fill(val);
+	    return true;
+	}
+
+    /**
+     * Assign new data
+     * @param other Vector to assign
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(const BaseNumVectorTemplate& other)
+	{ return assign(other.data(),other.length()); }
+
+    /**
+     * Append an array of values to vector
+     * @param buf Data to append
+     * @param len Length of data
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(const Type* buf, unsigned int len)
+	{ return buf && len ? change(length(),buf,len) : true; }
+
+    /**
+     * Append a value to vector
+     * @param val Value to append
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(Type val)
+	{ return append(&val,1); }
+
+    /**
+     * Append data
+     * @param other Vector to append
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(const BaseNumVectorTemplate& other)
+	{ return append(other.data(),other.length()); }
+
+    /**
+     * Insert an array of values to vector
+     * @param buf Data to append
+     * @param len Length of data
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(const Type* buf, unsigned int len, unsigned int pos = 0)
+	{ return buf && len ? change(pos,buf,len) : true; }
+
+    /**
+     * Insert a value in vector
+     * @param val Value to append
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(Type val, unsigned int pos = 0)
+	{ return insert(&val,1,pos); }
+
+    /**
+     * Insert data
+     * @param other Vector to append
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(const BaseNumVectorTemplate& other, unsigned int pos = 0)
+	{ return insert(other.data(),other.length(),pos); }
+
+    /**
+     * Reset vector
+     * @param offs Optional starting offset
+     * @param count Number of items to reset, negative for all
+     */
+    inline void reset(unsigned int offs = 0, int count = -1)
+	{ fill((Type)0,offs,count); }
+
+    /**
+     * Fill vector with data
+     * @param val Value to fill
+     * @param offs Start offset
+     * @param count Number of items to fill, negative to fill until vector end
+     * @return Number of filled items. 0 on empty count or failure
+     */
+    inline unsigned int fill(Type val, unsigned int offs = 0, int count = -1) {
+	    unsigned int n = available(offs,count);
+	    bufFill(val,data() + offs,n);
+	    return n;
+	}
+
+    /**
+     * Assignment (from other vector) operator
+     * @param other Vector to assign
+     * @return Vector reference
+     */
+    inline BaseNumVectorTemplate& operator=(const BaseNumVectorTemplate& other)
+	{ assign(other); return *this; }
+
+    /**
+     * Addition (append) operator
+     * @param other Vector to append
+     * @return Vector reference
+     */
+    inline BaseNumVectorTemplate& operator+=(const BaseNumVectorTemplate& other)
+	{ append(other); return *this; }
+
+    /**
+     * Array-like indexing operator with unsigned parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Reference to value
+     */
+    inline Type& operator[](unsigned int idx)
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with signed parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Reference to value
+     */
+    inline Type& operator[](signed int idx)
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with unsigned parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Value at index
+     */
+    inline Type operator[](unsigned int idx) const
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with signed parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Value at index
+     */
+    inline Type operator[](signed int idx) const
+	{ return data()[idx]; }
+
+    /**
+     * Sort this vector
+     * @param asc True to sort in ascending order, false to sort in descending order
+     */
+    inline void sort(bool asc = true)
+	{ bufSort(data(),length(),asc); }
+
+    /**
+     * Search for value in a buffer
+     * @param val Object value
+     * @param buf Pointer to buffer to search in
+     * @param len Buffer length
+     * @return Index of value, -1 if not found
+     */
+    static inline int bufIndexOf(Type val, const Type* buf, unsigned int len) {
+	    if (!buf)
+		return -1;
+	    const Type* orig = buf;
+	    while (len--)
+		if (val == *buf++)
+		    return buf - orig - 1;
+	    return -1;
+	}
+
+    /**
+     * Fill a buffer with value
+     * @param val Value to fill with
+     * @param buf Pointer to buffer to fill
+     * @param len Buffer length
+     */
+    static inline void bufFill(Type val, Type* buf, unsigned int len) {
+	    if (buf)
+		while (len--)
+		    *buf++ = val;
+	}
+
+    /**
+     * Fill a string with buffer values
+     * @param str Destination string
+     * @param buf Pointer to values
+     * @param len Values buffer length
+     * @param sep Values separator
+     * @param compact Compact ranges for shorter output. Assume vector is sorted ascending
+     * @return Destination string reference
+     */
+    static inline String& bufDump(String& str, const Type* buf, unsigned int len,
+	const char* sep = ",", bool compact = false) {
+	    if (!buf)
+		return str;
+	    if (compact && len > 2) {
+		unsigned int idx = 0;
+		for (unsigned int i = 1; true; ++i) {
+		    if (i < len && 1 == (buf[i] - buf[i - 1]))
+			continue;
+		    appendTo(str,buf[idx],sep);
+		    if (idx < i - 1)
+			appendTo(str,buf[i - 1],(1 == buf[i - 1] - buf[idx]) ? "," : "-");
+		    if (i >= len)
+			break;
+		    idx = i;
+		}
+	    }
+	    else
+		while (len--)
+		    appendTo(str,*buf++,sep);
+	    return str;
+	}
+
+    /**
+     * Sort a vector
+     * @param buf Pointer to values
+     * @param len Values buffer length
+     * @param asc True to sort in ascending order, false to sort in descending order
+     */
+    static inline void bufSort(Type* buf, unsigned int len, bool asc = true)
+	{ yateSortVal(buf,len,asc); }
+
+    /**
+     * Append value to string
+     * @param str Destination string
+     * @param val Value to append
+     * @param sep Separator to use
+     * @return Destination string reference
+     */
+    static inline String& appendTo(String& str, Type val, const char* sep = ",") {
+	    if (sep && str)
+		return str << sep << val;
+	    return str << val;
+	}
+
+    /**
+     * Calculate the number of items from bytes
+     * @param bytes Number of bytes
+     * @return Number of items
+     */
+    static inline uint64_t items(unsigned int bytes)
+	{ return bytes / sizeof(Type); }
+
+    /**
+     * Calculate the number of bytes from items number
+     * @param items Number of items
+     * @return Number of bytes used by given array length
+     */
+    static inline uint64_t bytes(unsigned int items)
+	{ return items * sizeof(Type); }
+
+protected:
+    /**
+     * Vector changed. Update length
+     */
+    inline void changed()
+	{ m_length = items(DataBlock::length()); }
+};
+
+#define YATE_DECLARE_BaseNumVector(ClsName,Type) \
+class ClsName : public BaseNumVectorTemplate<Type> \
+{ \
+    YCLASS(ClsName,BaseNumVector) \
+public: \
+    /** \
+     * Constructor \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(bytes(overAlloc)) \
+	{} \
+ \
+    /** \
+     * Constructor \
+     * @param buf Pointer to initial values \
+     * @param len Initial length \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(const Type* buf, unsigned int len, \
+	unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(buf,len,overAlloc) \
+	{} \
+ \
+    /** \
+     * Constructor \
+     * @param val Fill vector with value \
+     * @param len Initial length \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(Type val, unsigned int len, unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(val,len,overAlloc) \
+	{} \
+ \
+    /** \
+     * Copy constructor \
+     * @param other Vector to copy \
+     */ \
+    inline ClsName(const ClsName& other) \
+	{ *this = other; } \
+ \
+    /** \
+     * Parse values from comma separated list. Append or insert data \
+     * @param str Comma separated list of values \
+     * @param defVal Default to set if the string item is not a number \
+     * @param minVal Minimum value allowed \
+     * @param maxVal Maximum value allowed \
+     * @param flags Flags controlling the operation \
+     * @param loc Negative to append, greater than or equal to 0 to insert \
+     * @return Number of added items. Negative (-(added items + 1)) on memory allocation failure \
+     */ \
+    int parse(const String& str, Type defVal = 0, \
+	Type minVal = s_minVal, Type maxVal = s_maxVal, \
+	unsigned int flags = ParseList, int loc = -1); \
+ \
+    /** \
+     * Fill a string with vector values \
+     * @param str Destination string \
+     * @param sep Values separator \
+     * @param compact Compact ranges for shorter output. Assume vector is sorted ascending \
+     * @return Destination string reference \
+     */ \
+    String& dump(String& str, const char* sep = ",", bool compact = false) const; \
+ \
+    /** \
+     * Assignment (from other vector) operator \
+     * @param other Vector to assign \
+     */ \
+    inline ClsName& operator=(const ClsName& other) \
+	{ assign(other.data(),other.length()); return *this; } \
+ \
+   /** \
+     * A static empty object list \
+     * @return Reference to a static empty list \
+     */ \
+    static const ClsName& empty(); \
+ \
+    static const Type s_minVal; \
+    static const Type s_maxVal; \
+}
+
+YATE_DECLARE_BaseNumVector(UintVector,unsigned int);
+YATE_DECLARE_BaseNumVector(UlongVector,unsigned long);
+YATE_DECLARE_BaseNumVector(Uint8Vector,uint8_t);
+YATE_DECLARE_BaseNumVector(Uint16Vector,uint16_t);
+YATE_DECLARE_BaseNumVector(Uint32Vector,uint32_t);
+YATE_DECLARE_BaseNumVector(Uint64Vector,uint64_t);
+YATE_DECLARE_BaseNumVector(IntVector,int);
+YATE_DECLARE_BaseNumVector(LongVector,long);
+YATE_DECLARE_BaseNumVector(Int8Vector,int8_t);
+YATE_DECLARE_BaseNumVector(Int16Vector,int16_t);
+YATE_DECLARE_BaseNumVector(Int32Vector,int32_t);
+YATE_DECLARE_BaseNumVector(Int64Vector,int64_t);
+
+#undef YATE_DECLARE_BaseNumVector
 
 /**
  * Abstract base class representing a hash calculator
