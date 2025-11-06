@@ -2900,7 +2900,6 @@ public:
      * This method is thread safe
      * @param doc Document to build from
      * @param rootName Document root element name (it will be checked if set)
-     * @return XmlDocument pointer
      */
     void fromDocument(XmlDocument& doc, const char* rootName = "entitycaps");
 

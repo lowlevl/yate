@@ -2107,7 +2107,6 @@ class YSCRIPT_API ScriptRunData : public RefObject
 public:
     /**
      * Constructor
-     * @param name Name of the context
      */
     inline ScriptRunData()
 	{}
@@ -3947,7 +3946,7 @@ public:
 
     /**
      * Check a JsObject. Return it or 'null' or 'undefined'
-     * @param oper JsObject pointer to check
+     * @param jso JsObject pointer to check
      * @param name null/undefined ExpOperation name when given oper is NULL
      * @param null True to build 'null', false to build 'undefined' when given oper is NULL
      * @return ExpOperation pointer

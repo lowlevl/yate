@@ -1664,7 +1664,6 @@ public:
      * Answer an incoming call
      * @param id The accepted channel's id
      * @param setActive True to activate the answered channel
-     * @return True on success
      */
     void callAnswer(const String& id, bool setActive = true);
 
@@ -1673,7 +1672,6 @@ public:
      * @param id The channel's id
      * @param reason Optional termination reason
      * @param error Optional termination error
-     * @return True on success
      */
     void callTerminate(const String& id, const char* reason = 0, const char* error = 0);
 
@@ -5858,7 +5856,7 @@ public:
 
     /**
      * Set children updated flag
-     * @return New value for children updated flag
+     * @param on Updated state
      */
     inline void updated(bool on)
 	{ m_updated = on; }
