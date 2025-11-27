@@ -31,7 +31,7 @@ CLSOBJS := TelEngine.o ObjList.o HashList.o Mutex.o Thread.o Socket.o Resolver.o
 	String.o DataBlock.o NamedList.o \
 	URI.o Mime.o Array.o Iterator.o XML.o \
 	Hasher.o YMD5.o YSHA1.o YSHA256.o Base64.o Cipher.o Compressor.o \
-	Math.o MatchingItem.o
+	Math.o MatchingItem.o Vector.o
 ENGOBJS := Configuration.o Message.o Engine.o Plugin.o
 TELOBJS := DataFormat.o Channel.o
 CLIOBJS := Client.o ClientLogic.o
@@ -124,6 +124,12 @@ ClientLogic.o: @srcdir@/ClientLogic.cpp $(MKDEPS) $(CLINC)
 	$(COMPILE) -c $<
 
 String.o: @srcdir@/String.cpp $(MKDEPS) $(CINC)
+	$(COMPILE) $(REGEX_INC) -c $<
+
+XML.o: @srcdir@/XML.cpp $(MKDEPS) $(CINC) ../yatexml.h
+	$(COMPILE) $(REGEX_INC) -c $<
+
+MatchingItem.o: @srcdir@/MatchingItem.cpp $(MKDEPS) $(CINC) ../yatexml.h ../yatematchingitem.h
 	$(COMPILE) $(REGEX_INC) -c $<
 
 regex.o: @top_srcdir@/engine/regex/regex.c $(MKDEPS)

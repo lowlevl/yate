@@ -124,6 +124,8 @@ typedef unsigned long in_addr_t;
 
 #define FMT64 "%I64d"
 #define FMT64U "%I64u"
+#define FMT64x "%I64x"
+#define FMT64X "%I64X"
 
 #else /* _WINDOWS */
 
@@ -157,9 +159,13 @@ typedef int HANDLE;
 #if _WORDSIZE == 64 && !defined(__APPLE__)
 #define FMT64 "%ld"
 #define FMT64U "%lu"
+#define FMT64x "%lx"
+#define FMT64X "%lX"
 #else
 #define FMT64 "%lld"
 #define FMT64U "%llu"
+#define FMT64x "%llx"
+#define FMT64X "%llX"
 #endif
 
 #endif /* ! _WINDOWS */
@@ -800,6 +806,15 @@ public:
     ~Debugger();
 
     /**
+     * Set debugger name
+     * @param str New debugger name
+     */
+    inline void setName(const char* str) {
+	    if (m_name && str && *str)
+		m_name = str;
+	}
+
+    /**
      * Set the output callback
      * @param outFunc Pointer to the output function, NULL to use stderr
      */
@@ -1171,6 +1186,34 @@ template <class Obj> void yateSort(Obj* buf, unsigned int len,
     }
 }
 
+/**
+ * Sort a vector
+ * Held object MUST implement the assignment and inequality operators
+ * @param buf Pointer to buffer
+ * @param len Buffer length
+ * @param asc True to sort in ascending order, false to sort in descending order
+ */
+template <class Obj> void yateSortVal(Obj* buf, unsigned int len, bool asc)
+{
+    if (!buf)
+	return;
+    while (len > 1) {
+	unsigned int n = len;
+	len = 0;
+        for (unsigned int i = 1; i < n; ++i) {
+	    if (asc) {
+		if (buf[i - 1] <= buf[i])
+		    continue;
+	    }
+	    else if (buf[i - 1] >= buf[i])
+		continue;
+	    Obj tmp = buf[i - 1];
+	    buf[i - 1] = buf[i];
+	    buf[i] = tmp;
+	    len = i;
+	}
+    }
+}
 
 #undef YATOMIC_BUILTIN
 #define YATOMIC_LOCK
@@ -1955,6 +1998,69 @@ public:
      */
     inline Obj& operator*() const
 	{ return *pointer(); }
+};
+
+/**
+ * @short RefObject holding a GenObject
+ */
+template <class Obj = GenObject> class GenObjectRef : public RefObject
+{
+public:
+    /**
+     * Constructor
+     * @param obj Optional pointer to object
+     */
+    inline GenObjectRef(Obj* obj = 0)
+	: m_obj(obj)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~GenObjectRef()
+	{ assign(); }
+
+    /**
+     * Retrieve the stored object
+     * @return Pointer to the stored object
+     */
+    inline Obj* data()
+	{ return m_obj; }
+
+    /**
+     * Retrieve the stored object
+     * @return Pointer to the stored object
+     */
+    inline const Obj* data() const
+	{ return m_obj; }
+
+    /**
+     * Set a new stored pointer
+     * @param obj Pointer to the new stored object, NULL to reset
+     * @return Pointer to the stored object
+     */
+    inline Obj* assign(Obj* obj = 0) {
+	    if (m_obj) {
+		if (m_obj == obj)
+		    return m_obj;
+		m_obj->destruct();
+	    }
+	    m_obj = obj;
+	    return m_obj;
+	}
+
+    /**
+     * Retrieve and reset the stored object
+     * @return Pointer to the stored object
+     */
+    inline Obj* take() {
+	    Obj* tmp = m_obj;
+	    m_obj = 0;
+	    return tmp;
+	}
+
+protected:
+    Obj* m_obj;
 };
 
 /**
@@ -2758,6 +2864,8 @@ private:
     unsigned int m_size;
     unsigned int m_allocChunk;
 };
+
+typedef GenObjectRef<ObjVector> ObjVectorRef;
 
 /**
  * A simple Array class derivated from RefObject
@@ -5365,8 +5473,10 @@ public:
      * @param value Initial value of the string
      * @param len Length of the value, -1 for full string
      * @param namePrefix Prefix to put in front of the name of this string
+     * @param nameLen Length of name, -1 for full string
      */
-    explicit NamedString(const char* name, const char* value = 0, int len = -1, const char* namePrefix = 0);
+    explicit NamedString(const char* name, const char* value = 0, int len = -1,
+	const char* namePrefix = 0, int nameLen = -1);
 
     /**
      * Retrieve the name of this string.
@@ -7295,6 +7405,608 @@ private:
 };
 
 /**
+ * Base class for for template generic object vector holding basic C numeric types
+ * @short Base class for template generic object vector holding basic C numeric types
+ */
+class YATE_API BaseNumVector : protected DataBlock
+{
+    YCLASS(BaseNumVector,DataBlock);
+public:
+    /**
+     * Flags used by methods
+     */
+    enum Flags {
+	Unique = 0x0001,                 // Unique values. Used by parse from string
+	NoZero = 0x0002,                 // Do not allow zero. Used by parse from string
+	Range = 0x0004,                  // Allow range. Used by parse from string
+	Clamp = 0x0008,                  // Clamp values. Used by parse from string
+	// Masks
+	ParseList = Unique | Clamp,      // Default value for parse
+    };
+
+    /**
+     * Constructor
+     * @param overAllocBytes How many items to over allocate in bytes
+     */
+    inline BaseNumVector(unsigned int overAllocBytes = 0)
+	: DataBlock(overAllocBytes), m_length(0)
+	{}
+
+    /**
+     * Retrieve vector length
+     * @return Vector length
+     */
+    inline unsigned int length() const
+	{ return m_length; }
+
+protected:
+    unsigned int m_length;               // Vector length
+};
+
+/**
+ * Template for generic object vector holding basic C numeric types
+ * @short Template for generic object vector holding basic C numeric types
+ */
+template <class Type> class BaseNumVectorTemplate : public BaseNumVector
+{
+public:
+    /**
+     * Constructor
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{}
+
+    /**
+     * Constructor
+     * @param buf Pointer to initial values
+     * @param len Initial length
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(const Type* buf, unsigned int len,
+	unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{ assign(buf,len); }
+
+    /**
+     * Constructor
+     * @param val Fill vector with value
+     * @param len Initial length
+     * @param overAlloc How many items to over allocate
+     */
+    explicit inline BaseNumVectorTemplate(Type val, unsigned int len, unsigned int overAlloc = 0)
+	: BaseNumVector(bytes(overAlloc))
+	{ assign(val,len); }
+
+    /**
+     * Copy constructor
+     * @param other Vector to copy
+     */
+    inline BaseNumVectorTemplate(const BaseNumVectorTemplate& other)
+	{ *this = other; }
+
+    /**
+     * Destructor
+     */
+    virtual ~BaseNumVectorTemplate()
+	{ clear(); }
+
+    /**
+     * Retrieve vector size (total allocated items, including over alloc)
+     * @return Vector size
+     */
+    inline unsigned int size() const
+	{ return items(DataBlock::size()); }
+
+    /**
+     * Retrieve the over alloc value
+     * @return Over alloc value
+     */
+    inline unsigned int overAlloc() const
+	{ return items(DataBlock::overAlloc()); }
+
+    /**
+     * Set over alloc length
+     * @param count Value of over alloc length
+     */
+    inline void overAlloc(unsigned int count)
+	{ DataBlock::overAlloc(bytes(count)); }
+
+    /**
+     * Retrieve a pointer to data
+     * @return Type pointer, NULL if data not set
+     */
+    inline Type* data()
+	{ return (Type*)DataBlock::data(); }
+
+    /**
+     * Retrieve a pointer to data
+     * @return Type pointer, NULL if data not set
+     */
+    inline const Type* data() const
+	{ return (Type*)DataBlock::data(); }
+
+    /**
+     * Retrieve a pointer to data starting at offset
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve. Negative for all
+     * @return Type pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline Type* data(unsigned int offs, int count = -1)
+	{ return available(offs,count) ? (data() + offs) : 0; }
+
+    /**
+     * Retrieve a pointer to data
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve. Negative for all
+     * @return Type pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline const Type* data(unsigned int offs, int count = -1) const
+	{ return available(offs,count) ? (data() + offs) : 0; }
+
+    /**
+     * Retrive the number of items available from offset
+     * @param offs Index to start
+     * @param count Number of items to retrieve. Negative for all
+     * @return The number of items available from offset
+     */
+    inline unsigned int available(unsigned int offs, int count = -1) const {
+	    if (offs >= length())
+		return 0;
+	    int n = length() - offs;
+	    return count < 0 || count > n ? n : count;
+	}
+
+    /**
+     * Retrieve value at index
+     * @param idx Vector index to retrieve
+     * @return Value at index, 0 if out of bounds
+     */
+    inline Type at(unsigned int idx) const
+	{ return idx < length() ? data()[idx] : (Type)0; }
+
+    /**
+     * Retrieve index of object by value
+     * @param val Object value
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOf(Type val) const
+	{ return bufIndexOf(val,data(),length()); }
+
+    /**
+     * Retrieve index of object by value
+     * @param val Object value
+     * @param offs Index to start
+     * @param len Number of items to check starting at offset. Negative for all
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOf(Type val, unsigned int offs, int len = -1) const
+	{ return bufIndexOf(val,data() + offs,available(offs,len)); }
+
+    /**
+     * Check if a value exists in vector
+     * @param val Value to search for
+     * @return True if found, false otherwise
+     */
+    inline bool includes(Type val) const
+	{ return indexOf(val) >= 0; }
+
+    /**
+     * Check if a value exists in vector
+     * @param val Value to search for
+     * @param offs Index to start
+     * @param len Number of items to check starting at offset. Negative for all
+     * @return True if found, false otherwise
+     */
+    inline int includes(Type val, unsigned int offs, int len = -1) const
+	{ return indexOf(val,offs,len) >= 0; }
+
+    /**
+     * Clear data
+     */
+    inline void clear() {
+	    DataBlock::clear();
+	    m_length = 0;
+	}
+
+    /**
+     * Resize the vector
+     * @param len New vector length. Clear if 0
+     * @param keepData Keep old data This parameter is ignored if data is cleared
+     * @param reAlloc Re-allocate vector. Set it to false to move/reset data only.
+     *  This parameter is ignored if data is cleared
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool resize(unsigned int len, bool keepData = true, bool reAlloc = true) {
+	    unsigned int old = m_length;
+	    DataBlock::resize(bytes(len),keepData,reAlloc);
+	    changed();
+	    return old == m_length;
+	}
+
+    /**
+     * Change the current block. Insert or append data
+     * @param pos Buffer position, append at end if past buffer end
+     * @param buf Data to copy
+     * @param len Data length, ignored if 'buf' is NULL
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool change(unsigned int pos, const Type* buf, unsigned int len) {
+	    bool ok = DataBlock::change(bytes(pos),buf,bytes(len));
+	    changed();
+	    return ok;
+	}
+
+    /**
+     * Assign new data
+     * @param buf Data to assign, may be NULL to fill with zeros
+     * @param len Length of data, may be zero (then value is ignored)
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(const Type* buf, unsigned int len) {
+	    unsigned int old = m_length;
+	    DataBlock::assign((void*)buf,bytes(len));
+	    changed();
+	    return old == m_length;
+	}
+
+    /**
+     * Assign new data
+     * @param val Value to fill with
+     * @param len Length of data
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(Type val, unsigned int len) {
+	    if (!val)
+		return assign((const Type*)0,len);
+	    if (!resize(len))
+		return false;
+	    fill(val);
+	    return true;
+	}
+
+    /**
+     * Assign new data
+     * @param other Vector to assign
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(const BaseNumVectorTemplate& other)
+	{ return assign(other.data(),other.length()); }
+
+    /**
+     * Append an array of values to vector
+     * @param buf Data to append
+     * @param len Length of data
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(const Type* buf, unsigned int len)
+	{ return buf && len ? change(length(),buf,len) : true; }
+
+    /**
+     * Append a value to vector
+     * @param val Value to append
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(Type val)
+	{ return append(&val,1); }
+
+    /**
+     * Append data
+     * @param other Vector to append
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool append(const BaseNumVectorTemplate& other)
+	{ return append(other.data(),other.length()); }
+
+    /**
+     * Insert an array of values to vector
+     * @param buf Data to append
+     * @param len Length of data
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(const Type* buf, unsigned int len, unsigned int pos = 0)
+	{ return buf && len ? change(pos,buf,len) : true; }
+
+    /**
+     * Insert a value in vector
+     * @param val Value to append
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(Type val, unsigned int pos = 0)
+	{ return insert(&val,1,pos); }
+
+    /**
+     * Insert data
+     * @param other Vector to append
+     * @param pos Vector position
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool insert(const BaseNumVectorTemplate& other, unsigned int pos = 0)
+	{ return insert(other.data(),other.length(),pos); }
+
+    /**
+     * Reset vector
+     * @param offs Optional starting offset
+     * @param count Number of items to reset, negative for all
+     */
+    inline void reset(unsigned int offs = 0, int count = -1)
+	{ fill((Type)0,offs,count); }
+
+    /**
+     * Fill vector with data
+     * @param val Value to fill
+     * @param offs Start offset
+     * @param count Number of items to fill, negative to fill until vector end
+     * @return Number of filled items. 0 on empty count or failure
+     */
+    inline unsigned int fill(Type val, unsigned int offs = 0, int count = -1) {
+	    unsigned int n = available(offs,count);
+	    bufFill(val,data() + offs,n);
+	    return n;
+	}
+
+    /**
+     * Assignment (from other vector) operator
+     * @param other Vector to assign
+     * @return Vector reference
+     */
+    inline BaseNumVectorTemplate& operator=(const BaseNumVectorTemplate& other)
+	{ assign(other); return *this; }
+
+    /**
+     * Addition (append) operator
+     * @param other Vector to append
+     * @return Vector reference
+     */
+    inline BaseNumVectorTemplate& operator+=(const BaseNumVectorTemplate& other)
+	{ append(other); return *this; }
+
+    /**
+     * Array-like indexing operator with unsigned parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Reference to value
+     */
+    inline Type& operator[](unsigned int idx)
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with signed parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Reference to value
+     */
+    inline Type& operator[](signed int idx)
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with unsigned parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Value at index
+     */
+    inline Type operator[](unsigned int idx) const
+	{ return data()[idx]; }
+
+    /**
+     * Array-like indexing operator with signed parameter
+     * @param idx Vector index to retrieve. Not checked if valid
+     * @return Value at index
+     */
+    inline Type operator[](signed int idx) const
+	{ return data()[idx]; }
+
+    /**
+     * Sort this vector
+     * @param asc True to sort in ascending order, false to sort in descending order
+     */
+    inline void sort(bool asc = true)
+	{ bufSort(data(),length(),asc); }
+
+    /**
+     * Search for value in a buffer
+     * @param val Object value
+     * @param buf Pointer to buffer to search in
+     * @param len Buffer length
+     * @return Index of value, -1 if not found
+     */
+    static inline int bufIndexOf(Type val, const Type* buf, unsigned int len) {
+	    if (!buf)
+		return -1;
+	    const Type* orig = buf;
+	    while (len--)
+		if (val == *buf++)
+		    return buf - orig - 1;
+	    return -1;
+	}
+
+    /**
+     * Fill a buffer with value
+     * @param val Value to fill with
+     * @param buf Pointer to buffer to fill
+     * @param len Buffer length
+     */
+    static inline void bufFill(Type val, Type* buf, unsigned int len) {
+	    if (buf)
+		while (len--)
+		    *buf++ = val;
+	}
+
+    /**
+     * Fill a string with buffer values
+     * @param str Destination string
+     * @param buf Pointer to values
+     * @param len Values buffer length
+     * @param sep Values separator
+     * @param compact Compact ranges for shorter output. Assume vector is sorted ascending
+     * @return Destination string reference
+     */
+    static inline String& bufDump(String& str, const Type* buf, unsigned int len,
+	const char* sep = ",", bool compact = false) {
+	    if (!buf)
+		return str;
+	    if (compact && len > 2) {
+		unsigned int idx = 0;
+		for (unsigned int i = 1; true; ++i) {
+		    if (i < len && 1 == (buf[i] - buf[i - 1]))
+			continue;
+		    appendTo(str,buf[idx],sep);
+		    if (idx < i - 1)
+			appendTo(str,buf[i - 1],(1 == buf[i - 1] - buf[idx]) ? "," : "-");
+		    if (i >= len)
+			break;
+		    idx = i;
+		}
+	    }
+	    else
+		while (len--)
+		    appendTo(str,*buf++,sep);
+	    return str;
+	}
+
+    /**
+     * Sort a vector
+     * @param buf Pointer to values
+     * @param len Values buffer length
+     * @param asc True to sort in ascending order, false to sort in descending order
+     */
+    static inline void bufSort(Type* buf, unsigned int len, bool asc = true)
+	{ yateSortVal(buf,len,asc); }
+
+    /**
+     * Append value to string
+     * @param str Destination string
+     * @param val Value to append
+     * @param sep Separator to use
+     * @return Destination string reference
+     */
+    static inline String& appendTo(String& str, Type val, const char* sep = ",") {
+	    if (sep && str)
+		return str << sep << val;
+	    return str << val;
+	}
+
+    /**
+     * Calculate the number of items from bytes
+     * @param bytes Number of bytes
+     * @return Number of items
+     */
+    static inline uint64_t items(unsigned int bytes)
+	{ return bytes / sizeof(Type); }
+
+    /**
+     * Calculate the number of bytes from items number
+     * @param items Number of items
+     * @return Number of bytes used by given array length
+     */
+    static inline uint64_t bytes(unsigned int items)
+	{ return items * sizeof(Type); }
+
+protected:
+    /**
+     * Vector changed. Update length
+     */
+    inline void changed()
+	{ m_length = items(DataBlock::length()); }
+};
+
+#define YATE_DECLARE_BaseNumVector(ClsName,Type) \
+class ClsName : public BaseNumVectorTemplate<Type> \
+{ \
+    YCLASS(ClsName,BaseNumVector) \
+public: \
+    /** \
+     * Constructor \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(bytes(overAlloc)) \
+	{} \
+ \
+    /** \
+     * Constructor \
+     * @param buf Pointer to initial values \
+     * @param len Initial length \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(const Type* buf, unsigned int len, \
+	unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(buf,len,overAlloc) \
+	{} \
+ \
+    /** \
+     * Constructor \
+     * @param val Fill vector with value \
+     * @param len Initial length \
+     * @param overAlloc How many items to over allocate \
+     */ \
+    explicit inline ClsName(Type val, unsigned int len, unsigned int overAlloc = 0) \
+	: BaseNumVectorTemplate(val,len,overAlloc) \
+	{} \
+ \
+    /** \
+     * Copy constructor \
+     * @param other Vector to copy \
+     */ \
+    inline ClsName(const ClsName& other) \
+	{ *this = other; } \
+ \
+    /** \
+     * Parse values from comma separated list. Append or insert data \
+     * @param str Comma separated list of values \
+     * @param defVal Default to set if the string item is not a number \
+     * @param minVal Minimum value allowed \
+     * @param maxVal Maximum value allowed \
+     * @param flags Flags controlling the operation \
+     * @param loc Negative to append, greater than or equal to 0 to insert \
+     * @return Number of added items. Negative (-(added items + 1)) on memory allocation failure \
+     */ \
+    int parse(const String& str, Type defVal = 0, \
+	Type minVal = s_minVal, Type maxVal = s_maxVal, \
+	unsigned int flags = ParseList, int loc = -1); \
+ \
+    /** \
+     * Fill a string with vector values \
+     * @param str Destination string \
+     * @param sep Values separator \
+     * @param compact Compact ranges for shorter output. Assume vector is sorted ascending \
+     * @return Destination string reference \
+     */ \
+    String& dump(String& str, const char* sep = ",", bool compact = false) const; \
+ \
+    /** \
+     * Assignment (from other vector) operator \
+     * @param other Vector to assign \
+     */ \
+    inline ClsName& operator=(const ClsName& other) \
+	{ assign(other.data(),other.length()); return *this; } \
+ \
+   /** \
+     * A static empty object list \
+     * @return Reference to a static empty list \
+     */ \
+    static const ClsName& empty(); \
+ \
+    static const Type s_minVal; \
+    static const Type s_maxVal; \
+}
+
+YATE_DECLARE_BaseNumVector(UintVector,unsigned int);
+YATE_DECLARE_BaseNumVector(UlongVector,unsigned long);
+YATE_DECLARE_BaseNumVector(Uint8Vector,uint8_t);
+YATE_DECLARE_BaseNumVector(Uint16Vector,uint16_t);
+YATE_DECLARE_BaseNumVector(Uint32Vector,uint32_t);
+YATE_DECLARE_BaseNumVector(Uint64Vector,uint64_t);
+YATE_DECLARE_BaseNumVector(IntVector,int);
+YATE_DECLARE_BaseNumVector(LongVector,long);
+YATE_DECLARE_BaseNumVector(Int8Vector,int8_t);
+YATE_DECLARE_BaseNumVector(Int16Vector,int16_t);
+YATE_DECLARE_BaseNumVector(Int32Vector,int32_t);
+YATE_DECLARE_BaseNumVector(Int64Vector,int64_t);
+
+#undef YATE_DECLARE_BaseNumVector
+
+/**
  * Abstract base class representing a hash calculator
  * @short An abstract hashing class
  */
@@ -8403,6 +9115,17 @@ public:
     }
 
     /**
+     * Move all list parameters to another list. Replace existing in destination
+     * @param dest Destination list
+     * @param replaceAllExisting Remove all occurences of existing parameters (existing parameter
+     *  in this list will remove all occurences in destination).
+     *  Set it to false to remove only found instances (each existing parameter in this list will
+     *  replace a single parameter in destination)
+     * @return Destination list reference
+    */
+    NamedList& moveParamsReplace(NamedList& dest, bool replaceAllExisting = true);
+
+    /**
      * Dumps the name and all parameters to a string in a human readable format.
      * No escaping takes place so this method should be used for debugging only
      * @param str String to which the name and parameters are appended
@@ -8647,843 +9370,6 @@ protected:
     mutable String m_host;
     mutable String m_extra;
     mutable int m_port;
-};
-
-class MatchingItemBase;
-class MatchingItemString;
-class MatchingItemRegexp;
-class MatchingItemRandom;
-class MatchingItemList;
-class MatchingItemCustom;
-
-/**
- * This class holds matching parameters to be passed when matching in item
- * @short Matching item match parameters
- */
-class YATE_API MatchingParams : public String
-{
-    YCLASS(MatchingParams,String)
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     */
-    inline MatchingParams(const char* name = 0)
-	: String(name), m_now(0)
-	{}
-
-    uint64_t m_now;                      // Current time to be set when needed
-    ObjList m_params;                    // Arbitray parameters. May be set during matching
-};
-
-/**
- * This class holds dump matching item parameters
- * @short Matching item dump parameters
- */
-class YATE_API MatchingItemDump : public String
-{
-    YCLASS(MatchingItemDump,String)
-public:
-    /**
-     * Dump behaviour flags
-     */
-    enum DumpFlags {
-	NoInitialListDesc = 0x00000001,  // Do not dump list description at depth 0
-	DumpXmlStr        = 0x00000002,  // Used in dump(): dump string in xml format
-    };
-
-    /**
-     * Constructor
-     * @param params Optional parameters
-     * @param name Optional name
-     */
-    inline MatchingItemDump(const NamedList* params = 0, const char* name = 0)
-	: String(name), m_flags(0), m_rexEnclose('/'), m_strEnclose('\''),
-	m_nameValueSep(": "), m_negated('!'), m_caseInsentive('i'),
-	m_regexpBasic(0), m_regexpExtended(0)
-	{
-	    if (params)
-		init(*params);
-	}
-
-    /**
-     * Initialize dumper data
-     * @param params Parameters list
-     */
-    virtual void init(const NamedList& params);
-
-    /**
-     * Dump an item
-     * @param mi Item to dump
-     * @param buf Destination buffer
-     * @param indent Spaces for output
-     * @param origIndent Original indent
-     * @param depth Re-enter depth
-     * @return Destination buffer reference
-     */
-    virtual String& dump(const MatchingItemBase* mi, String& buf,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	unsigned int depth = 0) const;
-
-    /**
-     * Dump an item's value
-     * @param mi Item to dump
-     * @param buf Destination buffer
-     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
-     * @param origIndent Original indent
-     * @param depth Re-enter depth
-     * @return Destination buffer reference
-     */
-    virtual String& dumpValue(const MatchingItemBase* mi, String& buf,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	unsigned int depth = 0) const;
-
-    /**
-     * Dump an item in XML format
-     * @param mi Item to dump
-     * @param depth Re-enter depth
-     * @return XmlElement pointer, NULL if not dumped
-     */
-    virtual GenObject* dumpXml(const MatchingItemBase* mi, unsigned int depth = 0) const;
-
-    /**
-     * Dump an item
-     * @param mi Item to dump
-     * @param buf Destination buffer
-     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
-     * @param origIndent Original indent
-     * @param params Optional dumper parameters parameters
-     * @return Destination buffer reference
-     */
-    static inline String& dumpItem(const MatchingItemBase* mi, String& buf,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	const NamedList* params = 0) {
-	    MatchingItemDump tmp(params);
-	    return tmp.dump(mi,buf,indent,origIndent);
-	}
-
-    /**
-     * Dump an item
-     * @param mi Item to dump
-     * @param params Optional dumper parameters parameters
-     * @return XmlElement pointer, NULL if not dumped
-     */
-    static inline GenObject* dumpItemXml(const MatchingItemBase* mi, const NamedList* params = 0) {
-	    MatchingItemDump tmp(params);
-	    return tmp.dumpXml(mi);
-	}
-
-    unsigned int m_flags;                // Dump flags
-    char m_rexEnclose;                   // Regexp enclose char
-    char m_strEnclose;                   // String enclose char
-    String m_nameValueSep;               // Separator to be set between name and value
-    char m_negated;                      // Negated match value
-    char m_caseInsentive;                // Case insensitive match value
-    char m_regexpBasic;                  // Basic POSIX regexp value
-    char m_regexpExtended;               // Extended POSIX regexp value
-};
-
-/**
- * This class holds matching item load parameters
- * @short Matching item load parameters
- */
-class YATE_API MatchingItemLoad : public String
-{
-    YCLASS(MatchingItemLoad,String)
-public:
-    /**
-     * Load behaviour flags
-     */
-    enum LoadFlags {
-	RexBasic           = 0x00000001, // Load basic POSIX regular expressions
-	RexDetect          = 0x00000002, // Detect regular expression if value starts with ^
-                                         // Used when loading from parameters list
-	RexDetectNegated   = 0x00000004, // Detect negated regular expression if value ends with ^
-                                         // Used when loading from parameters list
-	RexValidate        = 0x00000008, // Validate regular expressions
-	NameReqSimple      = 0x00000010, // Request name of the parameter to match
-                                         // Used when loading from XML
-	IgnoreFailed       = 0x00000020, // Ignore failed to load items
-	ListAny            = 0x00000040, // Default 'any' (not match all) parameter value when loading a list 
-                                         // Used when loading from parameters list
-	PrivateFlag        = 0x100000000,// Private flag to be used for derived classes
-	DefaultFlags = RexDetect | RexDetectNegated | NameReqSimple,
-    };
-
-    /**
-     * Item flags
-     */
-    enum ItemFlags {
-	ItemNegated         = 0x00000001,// Matching is negated
-	ItemCaseInsensitive = 0x00000002,// Matching is case insensitive
-	ItemBasic           = 0x00000004,// Matching regexp: use basic POSIX
-	ItemAny             = 0x00000008,// Matching list: match any
-	ItemPrivateFlag     = 0x00010000,// Private flag to be used for custom matching
-    };
-
-    /**
-     * Constructor
-     * @param flags Optional load flags
-     * @param name Optional name
-     */
-    inline MatchingItemLoad(uint64_t flags = DefaultFlags, const char* name = 0)
-	: String(name), m_flags(flags), m_ignore(0), m_allow(0), m_dbg(0)
-	{}
-
-    /**
-     * Load matching item(s)
-     * Parameters prefix is formed from 'prefix' + ':' + our_string + ':' + 'suffix'
-     * @param params Parameters list
-     * @param error Optional pointer to error string
-     * @param prefix Optional parameters prefix
-     * @param suffix Optional parameters suffix
-     * @return MatchingItemBase pointer, NULL if none loaded
-     */
-    virtual MatchingItemBase* load(const NamedList& params, String* error = 0,
-	const char* prefix = 0, const char* suffix = 0) const;
-
-    /**
-     * Load matching item(s) from XML description
-     * @param str XML string
-     * @param error Optional pointer to error string
-     * @return MatchingItemBase pointer, NULL if none loaded
-     */
-    virtual MatchingItemBase* loadXml(const String& str, String* error = 0) const;
-
-    /**
-     * Load matching item(s) from XML description
-     * @param gen XmlElement object
-     * @param error Optional pointer to error string
-     * @return MatchingItemBase pointer, NULL if none loaded
-     */
-    virtual MatchingItemBase* loadXml(const GenObject* gen, String* error = 0) const;
-
-    /**
-     * Retrieve load flags dictionary
-     * @return TokenDict64 pointer
-     */
-    static const TokenDict64* loadFlags();
-
-    /**
-     * Retrieve item flags dictionary
-     * @return TokenDict pointer
-     */
-    static const TokenDict* itemFlags();
-
-    uint64_t m_flags;                    // Load flags
-    ObjList* m_ignore;                   // Optional list of mathing names to ignore (blacklist)
-    ObjList* m_allow;                    // Optional list of mathing names to allow (whitelist)
-    DebugEnabler* m_dbg;                 // Optional pointer to DebugEnabler to be used to put errors
-
-private:
-    inline bool flagSet(uint64_t mask) const
-	{ return 0 != (m_flags & mask); }
-    inline int emptyNameAllow(String* error) const {
-	    if (!flagSet(NameReqSimple))
-		return 0;
-	    if (flagSet(IgnoreFailed))
-		return 1;
-	    if (error)
-		error->printf("empty parameter match name");
-	    return -1;
-	}
-    inline bool ignore(const String& name) const
-	{ return (m_ignore && m_ignore->find(name)) || (m_allow && !m_allow->find(name)); }
-};
-
-/**
- * Base class for all matching items
- * @short Matching item common interface
- */
-class YATE_API MatchingItemBase : public GenObject
-{
-    YCLASS(MatchingItemBase,GenObject)
-    friend class MatchingItemList;
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemBase(const char* name, bool negated = false)
-	: m_name(name), m_notNegated(!negated)
-	{}
-
-    /**
-     * Retrieve the name of this item
-     * @return Item name
-     */
-    inline const String& name() const
-	{ return m_name; }
-
-    /**
-     * Check if this item is negated when testing
-     * @return True if negated, false otherwise
-     */
-    inline bool negated() const
-	{ return !m_notNegated; }
-
-    /**
-     * String match. Handles matching result negation
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return True if matches, false otherwise
-     */
-    inline bool matchString(const String& str, MatchingParams* params = 0) const
-	{ return m_notNegated == runMatchString(str,params); }
-
-    /**
-     * NamedList parameter match. Handles matching result negation
-     * @param list List to search for parameter match
-     * @param params Optional parameters used during match
-     * @return True if matches, false otherwise
-     */
-    inline bool matchListParam(const NamedList& list, MatchingParams* params = 0) const
-	{ return m_notNegated == runMatchListParam(list,params); }
-
-    /**
-     * String match to be implemented by descendants
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return False
-     */
-    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
-	{ return false; }
-
-    /**
-     * NamedList parameter match
-     * @param list List to search for parameter match
-     * @param params Optional parameters used during match
-     * @return True if matches, false otherwise
-     */
-    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const
-	{ return runMatchString(list[name()]); }
-
-    /**
-     * Copy this item
-     * @return MatchingItemBase pointer, NULL if not implemented
-     */
-    virtual MatchingItemBase* copy() const
-	{ return 0; }
-
-    /**
-     * Check if this item is a MatchingItemString one
-     * @return MatchingItemString pointer, NULL if this item is not a MatchingItemString
-     */
-    virtual const MatchingItemString* itemString() const
-	{ return 0; }
-
-    /**
-     * Check if this item is a MatchingItemRegexp one
-     * @return MatchingItemRegexp pointer, NULL if this item is not a MatchingItemRegexp
-     */
-    virtual const MatchingItemRegexp* itemRegexp() const
-	{ return 0; }
-
-    /**
-     * Check if this item is a MatchingItemRandom one
-     * @return MatchingItemRandom pointer
-     */
-    virtual const MatchingItemRandom* itemRandom() const
-	{ return 0; }
-
-    /**
-     * Check if this item is a MatchingItemList one
-     * @return MatchingItemList pointer, NULL if this item is not a MatchingItemList
-     */
-    virtual const MatchingItemList* itemList() const
-	{ return 0; }
-
-    /**
-     * Check if this item is a MatchingItemCustom one
-     * @return MatchingItemCustom pointer
-     */
-    virtual const MatchingItemCustom* itemCustom() const
-	{ return 0; }
-
-    /**
-     * Dump this item
-     * @param buf Destination buffer
-     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
-     * @param origIndent Original indent
-     * @param dump Optional dumper
-     * @param depth Re-enter depth
-     * @return Destination buffer reference
-     */
-    virtual String& dump(String& buf, const MatchingItemDump* dump = 0,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	unsigned int depth = 0) const
-	{ return buf; }
-
-    /**
-     * Dump this item's value
-     * @param buf Destination buffer
-     * @param dump Optional dumper
-     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
-     * @param origIndent Original indent
-     * @param depth Re-enter depth
-     * @return Destination buffer reference
-     */
-    virtual String& dumpValue(String& buf, const MatchingItemDump* dump = 0,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	unsigned int depth = 0) const
-	{ return buf; }
-
-    /**
-     * Dump this item in XML format
-     * @param dump Optional dumper
-     * @param depth Re-enter depth
-     * @return XmlElement pointer, NULL if not dumped
-     */
-    virtual GenObject* dumpXml(const MatchingItemDump* dump = 0, unsigned int depth = 0) const
-	{ return 0; }
-
-    /**
-     * Retrieve item name (suitable for list retrieval)
-     * @return Item name
-     */
-    virtual const String& toString() const
-	{ return name(); }
-
-private:
-    String m_name;                       // Item name
-    bool m_notNegated;                   // Item is not negated
-};
-
-/**
- * Match using a string comparison
- * @short String comparison matching item
- */
-class YATE_API MatchingItemString : public MatchingItemBase
-{
-    YCLASS(MatchingItemString,MatchingItemBase)
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     * @param value String to match
-     * @param caseInsensitive Set it to true to do a case insensitive match
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemString(const char* name, const char* value, bool caseInsensitive = false,
-	bool negated = false)
-	: MatchingItemBase(name,negated), m_value(value), m_caseMatch(!caseInsensitive)
-	{}
-
-    /**
-     * Retrieve the string to match
-     * @return String to match
-     */
-    inline const String& value() const
-	{ return m_value; }
-
-    /**
-     * Check if this item is using a case insensitive comparison
-     * @return True if this item is using a case insensitive comparison
-     */
-    inline bool caseInsensitive() const
-	{ return !m_caseMatch; }
-
-    /**
-     * String match
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return True if matched, false otherwise
-     */
-    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
-	{ return m_caseMatch ? (str == m_value) : (str &= m_value); }
-
-    /**
-     * Copy this item
-     * @return MatchingItemBase pointer
-     */
-    virtual MatchingItemBase* copy() const
-	{ return new MatchingItemString(name(),value(),caseInsensitive(),negated()); }
-
-    /**
-     * Check if this item is a MatchingItemString one
-     * @return MatchingItemString pointer
-     */
-    virtual const MatchingItemString* itemString() const
-	{ return this; }
-
-private:
-    String m_value;                      // String to match
-    bool m_caseMatch;                    // Non case insensitive match
-};
-
-/**
- * Match using a regular expression
- * @short A matching item using a regular expression
- */
-class YATE_API MatchingItemRegexp : public MatchingItemBase
-{
-    YCLASS(MatchingItemRegexp,MatchingItemBase)
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     * @param value Regular expression
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemRegexp(const char* name, const char* value, bool negated = false)
-	: MatchingItemBase(name,negated), m_value(value)
-	{}
-
-    /**
-     * Constructor
-     * @param name Item name
-     * @param value Regular expression
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemRegexp(const char* name, const Regexp& value, bool negated = false)
-	: MatchingItemBase(name,negated), m_value(value)
-	{}
-
-    /**
-     * Retrieve the regular expression used to match
-     * @return Regular expression used to match
-     */
-    inline const Regexp& value() const
-	{ return m_value; }
-
-    /**
-     * String match
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return True if matched, false otherwise
-     */
-    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
-	{ return m_value.matches(str); }
-
-    /**
-     * Copy this item
-     * @return MatchingItemBase pointer
-     */
-    virtual MatchingItemBase* copy() const
-	{ return new MatchingItemRegexp(name(),value(),negated()); }
-
-    /**
-     * Check if this item is a MatchingItemRegexp one
-     * @return MatchingItemRegexp pointer
-     */
-    virtual const MatchingItemRegexp* itemRegexp() const
-	{ return this; }
-
-    /**
-     * Build a MatchingItemRegexp from string
-     * @param name Item name
-     * @param str Regexp string
-     * @param negated Greater than 0: build a negated match, 0: buid a non negated match,
-     *  negative: build a negated match if str ends with ^
-     * @param insensitive Build a case insensitive regexp
-     * @param extended Build a regexp using extended POSIX
-     * @param fail positive: fail if regexp compile fails, negative fail if empty (do not check the regexp)
-     *   Remember: failed regexp never matches
-     * @return MatchingItemRegexp pointer, NULL on failure
-     */
-    static MatchingItemRegexp* build(const char* name, const String& str, int negated = 0,
-	bool insensitive = false, bool extended = false, int fail = 1);
-
-private:
-    Regexp m_value;                      // Regexp used for matching
-};
-
-/**
- * Match using a random number
- * Implements a matching of a reference value greater than RANDOM[0..MAX - 1]
- * List match and item name set:
- * Parameter present: use random match
- * Parameter not present: no match (return false)
- * @short Random number matching
- */
-class YATE_API MatchingItemRandom : public MatchingItemBase
-{
-    YCLASS(MatchingItemRandom,MatchingItemBase)
-public:
-    /**
-     * Constructor
-     * Random percent match: val=[PERCENT] maxVal=100
-     * @param val Reference value. 0: never match, 'maxVal' is ignored
-     * @param maxVal Upper interval value. 0, 1, less than / equal to 'val': always match
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     * @param name Item name
-     */
-    inline MatchingItemRandom(uint32_t val, uint32_t maxVal, bool negated = false,
-	const char* name = 0)
-	: MatchingItemBase(name,negated), m_value(val), m_maxVal(maxVal) {
-	    if (!m_value) // Never match
-		m_maxVal = 100;
-	    else if (m_maxVal < 2) // Always match. Avoid division by 0
-		m_value = m_maxVal = 100;
-	}
-
-    /**
-     * Retrieve the reference value used to make a decision
-     * @return The reference value used to make a decision
-     */
-    inline uint32_t value() const
-	{ return m_value; }
-
-    /**
-     * Retrieve the maximum value for random number
-     * @return The maximum value for random number
-     */
-    inline uint32_t maxValue() const
-	{ return m_maxVal; }
-
-    /**
-     * Run the match. Ignore the 'negated' property
-     * @return True if matched, false otherwise
-     */
-    inline bool randomMatch() const
-	{ return value() > (Random::random() % maxValue()); }
-
-    /**
-     * String match
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return True if matched, false otherwise
-     */
-    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
-	{ return randomMatch(); }
-
-    /**
-     * NamedList parameter match
-     * @param list List to search for parameter match
-     * @param params Optional parameters used during match
-     * @return True if matches, false otherwise
-     */
-    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const
-	{ return (!name() || list.getParam(name())) ? randomMatch() : false; }
-
-    /**
-     * Copy this item
-     * @return MatchingItemBase pointer
-     */
-    virtual MatchingItemBase* copy() const
-	{ return new MatchingItemRandom(value(),maxValue(),negated(),name()); }
-
-    /**
-     * Check if this item is a MatchingItemRandom one
-     * @return MatchingItemRandom pointer
-     */
-    virtual const MatchingItemRandom* itemRandom() const
-	{ return this; }
-
-private:
-    uint32_t m_value;                    // Reference value
-    uint32_t m_maxVal;                   // Max value
-};
-
-/**
- * List of matching items
- * @short A list of matching items
- */
-class YATE_API MatchingItemList : public MatchingItemBase
-{
-    YCLASS(MatchingItemList,MatchingItemBase)
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     * @param matchAll True to match all items (logical AND), false to match any item (logical OR)
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemList(const char* name, bool matchAll = true, bool negated = false)
-	: MatchingItemBase(name,negated), m_matchAll(matchAll)
-	{}
-
-    /**
-     * Check if all items must match
-     * @return True if all items must match (logical AND), false if any item matches (logical OR)
-     */
-    inline bool matchAll() const
-	{ return m_matchAll; }
-
-    /**
-     * Retrieve the list length
-     * @return List length
-     */
-    inline unsigned int length() const
-	{ return m_value.length(); }
-
-    /**
-     * Retrieve the number of non empty items in list
-     * @return The number of non empty items in list
-     */
-    inline unsigned int count() const
-	{ return m_value.count(); }
-
-    /**
-     * Retrieve a pointer to item at given index
-     * @param index Index to retrieve
-     * @return MatchingItemBase pointer, NULL if not set or index is out of bounds
-     */
-    inline const MatchingItemBase* at(unsigned int index) const
-	{ return static_cast<MatchingItemBase*>(m_value.at(index)); }
-
-    /**
-     * Retrieve the index of an item found by name
-     * @param name Item name
-     * @return Index of found item, negative if not found
-     */
-    inline int indexOf(const String& name) const
-	{ return m_value.index(name); }
-
-    /**
-     * Find an item by name
-     * @param name Item name
-     * @return MatchingItemBase pointer, NULL if not found
-     */
-    inline const MatchingItemBase* find(const String& name) const {
-	    int idx = indexOf(name);
-	    return idx >= 0 ? at(idx) : 0;
-	}
-
-    /**
-     * Change list (append,insert,replace,remove)
-     * Item is removed if given pointer is NULL, position is valid and 'ins' is false
-     * @param item Item to set, pointer will be consumed
-     * @param pos Item position. Append if negative or past list length
-     * @param ins Set it to true to insert, false to replace or append
-     * @param overAlloc Optional number of items to over allocate
-     *  This parameter is ignored if there is enough space in the list set append the item
-     * @return True on success, false on failure (memory allocation error or NULL pointer given)
-     */
-    bool change(MatchingItemBase* item, int pos = -1, bool ins = false, unsigned int overAlloc = 1);
-
-    /**
-     * Append an item to the list
-     * @param item Item to append, pointer will be consumed
-     * @param overAlloc Optional number of items to over allocate
-     *  This parameter is ignored if there is enough space in the list set append the item
-     * @return True on success, false on failure (memory allocation error or NULL pointer given)
-     */
-    inline bool append(MatchingItemBase* item, unsigned int overAlloc = 1)
-	{ return change(item,-1,false,overAlloc); }
-
-    /**
-     * Append a list of items to the list
-     * @param list Items list
-     */
-    inline void append(ObjList& list) {
-	    ObjList* first = list.skipNull();
-	    if (!first)
-		return;
-	    unsigned int count = first->count();
-	    append(static_cast<MatchingItemBase*>(first->remove(false)),count - 1);
-	    while (0 != (first = first->skipNull()))
-		append(static_cast<MatchingItemBase*>(first->remove(false)),0);
-	}
-
-    /**
-     * Set an item at given position
-     * Item is removed if given pointer is NULL
-     * @param item Item to set, pointer will be consumed
-     * @param pos Item position. Append if past list length
-     * @param overAlloc Optional number of items to over allocate
-     *  This parameter is ignored if there is enough space in the list set append the item
-     * @return True on success, false on failure (memory allocation error or NULL pointer given)
-     */
-    inline bool set(MatchingItemBase* item, unsigned int pos, unsigned int overAlloc = 1)
-	{ return change(item,pos,false,overAlloc); }
-
-    /**
-     * Insert an item at list start
-     * @param item Item to insert, pointer will be consumed
-     * @param pos Item position. Append if past list length
-     * @param overAlloc Optional number of items to over allocate
-     *  This parameter is ignored if there is enough space in the list set append the item
-     * @return True on success, false on failure (memory allocation error or NULL pointer given)
-     */
-    inline bool insert(MatchingItemBase* item, unsigned int pos = 0, unsigned int overAlloc = 1)
-	{ return change(item,pos,true,overAlloc); }
-
-    /**
-     * String match
-     * @param str String to match
-     * @param params Optional parameters used during match
-     * @return True if matched, false otherwise
-     */
-    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const;
-
-    /**
-     * NamedList parameter match
-     * @param list List to search for parameter match
-     * @param params Optional parameters used during match
-     * @return True if matches, false otherwise
-     */
-    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const;
-
-    /**
-     * Copy this item
-     * @return MatchingItemBase pointer
-     */
-    virtual MatchingItemBase* copy() const;
-
-    /**
-     * Check if this item is a MatchingItemList one
-     * @return MatchingItemList pointer
-     */
-    virtual const MatchingItemList* itemList() const
-	{ return this; }
-
-    /**
-     * Optimize a MatchingItemList
-     * Delete list if empty or there is only one item in it, return the first item in it any
-     * @param list List to optimize
-     * @return MatchingItemBase pointer, may be the list itself if not optimized
-     *  May be NULL if list is empty
-     */
-    static MatchingItemBase* optimize(MatchingItemList* list);
-
-private:
-    ObjVector m_value;                   // List of items to match
-    bool m_matchAll;                     // Match all/any item(s)
-};
-
-/**
- * Custom match
- * @short Base class for custom matching
- */
-class YATE_API MatchingItemCustom : public MatchingItemBase
-{
-    YCLASS(MatchingItemCustom,MatchingItemBase)
-public:
-    /**
-     * Constructor
-     * @param name Item name
-     * @param type Type name
-     * @param negated True if matching is negated (return the opposite of match in
-     *  public methods), false otherwise
-     */
-    inline MatchingItemCustom(const char* name, const char* type, bool negated = false)
-	: MatchingItemBase(name,negated), m_type(type)
-	{}
-
-    /**
-     * Retrieve the type
-     * @return Type name
-     */
-    inline const String& type() const
-	{ return m_type; }
-
-    /**
-     * Check if this item is a MatchingItemCustom one
-     * @return MatchingItemCustom pointer
-     */
-    virtual const MatchingItemCustom* itemCustom() const
-	{ return this; }
-
-private:
-    String m_type;
 };
 
 /**
