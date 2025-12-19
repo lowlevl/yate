@@ -1085,7 +1085,7 @@ bool XmlSaxParser::processText(String& text)
 
 
 /*
- * XmlDomPareser
+ * XmlDomParser
  */
 XmlDomParser::XmlDomParser(const char* name, bool fragment)
     : XmlSaxParser(name),
@@ -1256,37 +1256,38 @@ void XmlDomParser::reset()
     XmlSaxParser::reset();
 }
 
-XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, NamedPointer** npOwner,
-    int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
+static inline GenObject* getXmlOrFrag(bool xml, const NamedList& params, const String& param,
+    NamedPointer** npOwner, int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
 {
     NamedString* ns = params.getParam(param ? param : s_xml);
     if (!ns) {
 	if (error)
-	    *error = GetXmlMissing;
+	    *error = XmlSaxParser::GetXmlMissing;
 	return 0;
     }
-    NamedPointer* np = YOBJECT(NamedPointer,ns);
-    if (np) {
-	XmlElement* xml = YOBJECT(XmlElement,np->userData());
-	if (xml) {
-	    if (npOwner)
-		*npOwner = np;
-	    else
-		np->takeData();
-	    return xml;
-	}
+    if (xml) {
+	XmlElement* x = XmlElement::getNamedPtr(ns,npOwner);
+	if (x)
+	    return x;
+	if (npOwner)
+	    *npOwner = 0;
+	return XmlDomParser::parseXml(*ns,error,parserName,dbg,warnLevel,&params,ns);
     }
+    XmlFragment* f = XmlFragment::getNamedPtr(ns,npOwner);
+    if (f)
+	return f;
     if (npOwner)
 	*npOwner = 0;
-    return parseXml(*ns,error,parserName,dbg,warnLevel,&params,ns);
+    return XmlDomParser::parseFragment(*ns,error,parserName,dbg,warnLevel,&params,ns);
 }
 
-XmlElement* XmlDomParser::parseXml(const String& buf, int* error, const char* parserName,
-    DebugEnabler* dbg, int warnLevel, const NamedList* params, const NamedString* param)
+static inline void* parseXmlOrFrag(bool xml, const String& buf, int* error,
+    const char* parserName, DebugEnabler* dbg, int warnLevel,
+    const NamedList* params, const NamedString* param)
 {
     if (!buf) {
 	if (error)
-	    *error = GetXmlEmpty;
+	    *error = XmlSaxParser::GetXmlEmpty;
 	return 0;
     }
     const char* str = buf;
@@ -1294,16 +1295,25 @@ XmlElement* XmlDomParser::parseXml(const String& buf, int* error, const char* pa
     if (dbg)
 	parser.debugChain(dbg);
     bool ok = parser.parse(str);
-    XmlElement* xml = parser.fragment()->popElement();
     if (xml) {
-	if (params && dbg && dbg->debugAt(DebugInfo)) {
-	    XmlElement* extra = parser.fragment()->popElement();
-	    if (extra) {
-		TelEngine::destruct(extra);
-		Debug(dbg,DebugInfo,"Ignoring extra xml element in '%s'",params->safe());
+	XmlElement* x = parser.fragment()->popElement();
+	if (x) {
+	    if (params && dbg && dbg->debugAt(DebugInfo)) {
+		XmlElement* extra = parser.fragment()->popElement();
+		if (extra) {
+		    TelEngine::destruct(extra);
+		    Debug(dbg,DebugInfo,"Ignoring extra xml element in '%s'",params->safe());
+		}
 	    }
+	    return x;
 	}
-	return xml;
+    }
+    else if (ok) {
+	XmlFragment* f = new XmlFragment;
+	f->move(*(parser.fragment()));
+	if (!f->getChildren().skipNull())
+	    TelEngine::destruct(f);
+	return f;
     }
     if (!(warnLevel > 0 && dbg && dbg->debugAt(warnLevel)))
 	warnLevel = 0;
@@ -1335,6 +1345,30 @@ XmlElement* XmlDomParser::parseXml(const String& buf, int* error, const char* pa
 		param->name().safe(),param->safe(),dbg);
     }
     return 0;
+}
+
+XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param,
+    NamedPointer** npOwner, int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
+{
+    return static_cast<XmlElement*>(getXmlOrFrag(true,params,param,npOwner,error,parserName,dbg,warnLevel));
+}
+
+XmlElement* XmlDomParser::parseXml(const String& buf, int* error, const char* parserName,
+    DebugEnabler* dbg, int warnLevel, const NamedList* params, const NamedString* param)
+{
+    return static_cast<XmlElement*>(parseXmlOrFrag(true,buf,error,parserName,dbg,warnLevel,params,param));
+}
+
+XmlFragment* XmlDomParser::getFragment(const NamedList& params, const String& param,
+    NamedPointer** npOwner, int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
+{
+    return static_cast<XmlFragment*>(getXmlOrFrag(false,params,param,npOwner,error,parserName,dbg,warnLevel));
+}
+
+XmlFragment* XmlDomParser::parseFragment(const String& buf, int* error, const char* parserName,
+    DebugEnabler* dbg, int warnLevel, const NamedList* params, const NamedString* param)
+{
+    return static_cast<XmlFragment*>(parseXmlOrFrag(false,buf,error,parserName,dbg,warnLevel,params,param));
 }
 
 
@@ -1478,6 +1512,16 @@ void XmlFragment::copy(const XmlFragment& other, XmlParent* parent)
     }
 }
 
+// Copy other fragment into this one
+void XmlFragment::move(XmlFragment& other, XmlParent* parent)
+{
+    for (ObjList* o = other.getChildren().skipNull(); o; o = o->skipNull()) {
+	XmlChild* ch = static_cast<XmlChild*>(o->get());
+	ch->setParent(parent);
+	addChild(ch);
+    }
+}
+
 // Create a String from this XmlFragment
 String& XmlFragment::toString(String& dump, bool escape, const String& indent,
     const String& origIndent, bool completeOnly, const String* auth,
@@ -1515,34 +1559,14 @@ String& XmlFragment::toString(String& dump, bool escape, const String& indent,
 XmlElement* XmlFragment::getElement(ObjList*& lst, const String* name, const String* ns,
     bool noPrefix)
 {
+    if (!lst)
+	return 0;
+    if (!lst->get())
+	lst = lst->skipNull();
     for (; lst; lst = lst->skipNext()) {
 	XmlElement* x = (static_cast<XmlChild*>(lst->get()))->xmlElement();
-	if (!(x && x->completed()))
+	if (!(x && x->completed() && x->matches(name,ns,noPrefix)))
 	    continue;
-	if (name || ns) {
-	    if (!ns) {
-		// Compare tag
-		if (noPrefix) {
-		    if (*name != x->unprefixedTag())
-			continue;
-		}
-		else if (*name != x->toString())
-		    continue;
-	    }
-	    else if (name) {
-		// Compare tag and namespace
-		const String* t = 0;
-		const String* n = 0;
-		if (!(x->getTag(t,n) && *t == *name && n && *n == *ns))
-		    continue;
-	    }
-	    else {
-		// Compare namespace
-		const String* n = x->xmlns();
-		if (!n || *n != *ns)
-		    continue;
-	    }
-	}
 	lst = lst->skipNext();
 	return x;
     }
@@ -1567,6 +1591,31 @@ void XmlFragment::addElements(ObjVector& vect, ObjList* lst)
     }
     if (idx && idx < vect.length())
 	vect.resize(idx,true,false);
+}
+
+XmlElement* XmlFragment::removeElement(ObjList& list, const String* name, bool delObj,
+    bool single, const String* ns, bool noPrefix)
+{
+    XmlElement* xml = 0;
+    for (ObjList* o = list.skipNull(); o;) {
+	XmlElement* x = (static_cast<XmlChild*>(o->get()))->xmlElement();
+	if (!(x && x->matches(name,ns,noPrefix))) {
+	    o = o->skipNext();
+	    continue;
+	}
+	o->remove(false);
+	x->setParent(0);
+	if (!xml)
+	    xml = x;
+	else
+	    TelEngine::destruct(x);
+	if (single)
+	    break;
+	o = o->skipNull();
+    }
+    if (delObj)
+	TelEngine::destruct(xml);
+    return xml;
 }
 
 // Replaces all ${paramname} in fragment's children with the corresponding parameters
@@ -2086,6 +2135,48 @@ XmlChild* XmlElement::removeChild(XmlChild* child, bool delObj)
     return m_children.removeChild(child,delObj);
 }
 
+XmlElement* XmlElement::removeElement(const XPath& path, bool delObj, bool single,
+    int clearEmptyPathDepth)
+{
+    ObjList lst;
+    XmlElement* xml = path.findXml(*this,single ? 0 : &lst);
+    if (!xml)
+	return 0;
+    if (xml->parent() == this)
+	return removeElement(xml,delObj);
+    if (single)
+	lst.append(xml)->setDelete(false);
+    for (ObjList* o = lst.skipNull(); o; o = o->skipNull()) {
+	XmlElement* x = static_cast<XmlElement*>(o->remove(false));
+	XmlElement* parent = x->parent();
+	if (!parent) {
+	    if (xml == x)
+		xml = 0;
+	    continue;
+	}
+	if (xml == x)
+	    xml = parent->removeElement(xml,delObj);
+	else
+	    parent->removeElement(x);
+	if (!clearEmptyPathDepth)
+	    continue;
+	int n = clearEmptyPathDepth;
+	while (!parent->findFirstChild()) {
+	    x = parent;
+	    parent = parent->parent();
+	    if (!parent)
+		break;
+	    parent->removeElement(x);
+	    if (n < 0)
+		continue;
+	    if (1 == n)
+		break;
+	    n--;
+	}
+    }
+    return xml;
+};
+
 // Set this element's parent. Update inherited namespaces
 void XmlElement::setParent(XmlParent* parent)
 {
@@ -2303,6 +2394,41 @@ void XmlElement::xml2param(NamedList& list, XmlElement* parent, const String* ta
 	if (ns)
 	    list.addParam(ns);
     }
+}
+
+String& XmlElement::dumpPath(String& buf, const XmlElement* xml, int depth, bool includeTag,
+    const char* sep, const XmlElement* stop, bool includeStop)
+{
+    if (!xml)
+	return buf;
+    const XmlElement* parent = xml;
+    ObjList lst;
+    if (depth < 0) {
+	while (depth++ && 0 != (parent = parent->parent())) {
+	    if (!(stop && stop == parent))
+		lst.insert(&(parent->unprefixedTag()))->setDelete(false);
+	    else {
+		if (includeStop)
+		    lst.insert(&(parent->unprefixedTag()))->setDelete(false);
+		break;
+	    }
+	}
+    }
+    else {
+	while (0 != (parent = parent->parent())) {
+	    if (!(stop && stop == parent))
+		lst.insert(&(parent->unprefixedTag()))->setDelete(false);
+	    else {
+		if (includeStop)
+		    lst.insert(&(parent->unprefixedTag()))->setDelete(false);
+		break;
+	    }
+	}
+	while (depth-- && lst.get())
+	    lst.remove(false);
+    }
+    buf.append(lst,sep);
+    return includeTag ? buf.append(xml->unprefixedTag(),sep) : buf;
 }
 
 

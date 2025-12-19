@@ -753,8 +753,64 @@ public:
 	DebugEnabler* dbg = 0, int warnLevel = DebugMild,
 	const NamedList* params = 0, const NamedString* param = 0);
 
-protected:
+    /**
+     * Retrieve an XML fragment from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'xml' if empty
+     * @param npOwner Optional pointer to data to be filled with NamedPointer owning the fragment.
+     *  If parameter is NamedPointer carrying an XmlFragment and 'npOwner' is NULL the pointer will
+     *   be taken from it
+     * @param error Optional pointer to parser error code
+     * @param parserName Optional parser name if needing to parse from string
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @return XmlFragment pointer, NULL if missing or parser failure.
+     *  If 'npOwner' is given and set on return the returned pointer is owned by it.
+     *  If 'npOwner' is not given or not set on return the returned pointer is owned by the caller.
+     */
+    static XmlFragment* getFragment(const NamedList& params, const String& param,
+	NamedPointer** npOwner, int* error = 0, const char* parserName = 0, DebugEnabler* dbg = 0,
+	int warnLevel = DebugMild);
 
+    /**
+     * Retrieve an XML fragment from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'xml' if empty
+     * @param autoDel Owner of returned xml if any. It will own the xml fragment if we built one
+     * @param error Optional pointer to parser error code
+     * @param parserName Optional parser name if needing to parse from string
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @return XmlFragment pointer, NULL if missing or parser failure.
+     */
+    static inline XmlFragment* getFragment(const NamedList& params, const String& param,
+	AutoGenObject& autoDel, int* error = 0,
+	const char* parserName = 0, DebugEnabler* dbg = 0, int warnLevel = DebugMild) {
+	    NamedPointer* np = 0;
+	    XmlFragment* f = getFragment(params,param,&np,error,parserName,dbg,warnLevel);
+	    autoDel.set(np ? 0 : (GenObject*)f);
+	    return f;
+	}
+
+    /**
+     * Parse an XML fragment from string value
+     * @param buf Buffer to parse
+     * @param error Optional pointer to parser error code
+     * @param parserName Optional parser name
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @param params Optional pointer to parameters list if buffer is obtained from it (for debug purposes)
+     * @param param Optional pointer to parameter (for debug purposes)
+     * @return XmlFragment pointer, NULL if missing or parser failure
+     */
+    static XmlFragment* parseFragment(const String& buf, int* error = 0,
+	const char* parserName = 0, DebugEnabler* dbg = 0, int warnLevel = DebugMild,
+	const NamedList* params = 0, const NamedString* param = 0);
+
+protected:
     /**
      * Append a xml comment in the xml tree
      * @param text The comment content
@@ -952,8 +1008,9 @@ private:
  * Xml Fragment a fragment from a Xml document
  * @short Xml Fragment
  */
-class YATE_API XmlFragment : public XmlParent
+class YATE_API XmlFragment : public XmlParent, public GenObject
 {
+    YCLASS(XmlFragment,GenObject)
     friend class XmlElement;
 public:
 
@@ -1021,6 +1078,22 @@ public:
     virtual XmlChild* removeChild(XmlChild* child, bool delObj = true);
 
     /**
+     * Remove child element(s).
+     * Return first element if not deleted
+     * @param name Optional name of the child
+     * @param delObj True to delete the object
+     * @param single Single / all removal
+     * @param ns Optional child namespace
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag.
+     *  This parameter is ignored if name is 0 or ns is not 0
+     * @return XmlElement pointer if found and not deleted, NULL otherwise
+     */
+    inline XmlElement* removeElement(const String* name = 0, bool delObj = true,
+	bool single = true, const String* ns = 0, bool noPrefix = true)
+	{ return removeElement(m_list,name,delObj,single,ns,noPrefix); }
+
+    /**
      * Clear the list of children
      */
     virtual void clearChildren()
@@ -1032,6 +1105,13 @@ public:
      * @param parent Optional parent to set in copied children
      */
     void copy(const XmlFragment& other, XmlParent* parent = 0);
+
+    /**
+     * Move other fragment contents into this one
+     * @param other Fragment to move
+     * @param parent Optional parent to set in children
+     */
+    void move(XmlFragment& other, XmlParent* parent = 0);
 
     /**
      * Build a String from this XmlFragment
@@ -1109,6 +1189,61 @@ public:
      * @param lst List of XmlChild
      */
     static void addElements(ObjVector& vect, ObjList* lst);
+
+    /**
+     * Remove child element(s).
+     * Return first element if not deleted
+     * @param list The list to remove from
+     * @param name Optional name of the child
+     * @param delObj True to delete the object
+     * @param single Single / all removal
+     * @param ns Optional child namespace
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag.
+     *  This parameter is ignored if name is 0 or ns is not 0
+     * @return XmlElement pointer if found and not deleted, NULL otherwise
+     */
+    static XmlElement* removeElement(ObjList& list, const String* name = 0, bool delObj = true,
+	bool single = true, const String* ns = 0, bool noPrefix = true);
+
+    /**
+     * Retrieve an XML fragment from NamedPointer
+     * @param obj Object to check
+     * @param npOwner Optional pointer to data to be filled with NamedPointer owning the fragment
+     * @param copy Set it to true to return a copy of the fragment
+     * @param take True to take the fragment, false to leave it in NamedPointer carrying it.
+     *  This parameter is ignored if copy is requested or 'npOwner' is given
+     * @return XmlFragment pointer, NULL if missing.
+     *  If 'npOwner' is given and set on return the returned pointer is owned by it.
+     *  If 'npOwner' is not given or not set on return the returned pointer is owned by the caller.
+     */
+    static inline XmlFragment* getNamedPtr(const GenObject* obj, NamedPointer** npOwner = 0,
+	bool copy = false, bool take = true) {
+	    NamedPointer* np = YOBJECT(NamedPointer,obj);
+	    if (!np)
+		return 0;
+	    XmlFragment* xml = YOBJECT(XmlFragment,np);
+	    if (!xml)
+		return 0;
+	    if (copy)
+		return new XmlFragment(*xml);
+	    if (npOwner)
+		*npOwner = np;
+	    else if (take)
+		np->takeData();
+	    return xml;
+	}
+
+    /**
+     * Retrieve an XML fragment from GenObject
+     * @param obj Object to check
+     * @param copy Set it to true to return a copy of the fragment
+     * @return XmlFragment pointer, NULL if obj is not an XmlFragment
+     */
+    static inline XmlFragment* get(const GenObject* obj, bool copy = false) {
+	    XmlFragment* xml = YOBJECT(XmlFragment,obj);
+	    return xml && copy ? new XmlFragment(*xml) : xml;
+	}
 
 private:
     static XmlElement* elementMatch(XmlElement* xml, const String* name, const String* ns,
@@ -1371,6 +1506,41 @@ public:
     bool getTag(const String*& tag, const String*& ns) const;
 
     /**
+     * Check if element tag matches
+     * @param name Name to check
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag
+     * @return True if matches, false if not
+     */
+    inline bool matchesTag(const String& name, bool noPrefix = true) const
+	{ return noPrefix ? name == unprefixedTag() : name == m_element; }
+
+    /**
+     * Check if element namespace matches
+     * @param ns Namespace to check
+     * @return True if matches, false if not
+     */
+    inline bool matchesXmlns(const String& ns) const {
+	    const String* n = xmlns();
+	    return n && *n == ns;
+	}
+
+    /**
+     * Check if element matches tag / namespace
+     * @param name Optional name (tag)
+     * @param ns Optional namespace
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag.
+     *  This parameter is ignored if name is 0 or ns is not 0
+     * @return True if matches, false if not
+     */
+    inline bool matches(const String* name = 0, const String* ns = 0, bool noPrefix = true) const {
+	    if (!ns)
+		return !name || matchesTag(*name,noPrefix);
+	    return (!name || *name == getTag()) && matchesXmlns(*ns);
+	}
+
+    /**
      * Get an XmlElement from this XmlChild
      * @return This object
      */
@@ -1397,6 +1567,44 @@ public:
      * @return XmlChild pointer if found and not deleted
      */
     virtual XmlChild* removeChild(XmlChild* child, bool delObj = true);
+
+    /**
+     * Remove a child
+     * @param child The child to remove
+     * @param delObj True to delete the object
+     * @return XmlElement pointer if found and not deleted, NULL otherwise
+     */
+    inline XmlElement* removeElement(XmlElement* child, bool delObj = true)
+	{ return child ? static_cast<XmlElement*>(removeChild(child,delObj)) : 0; }
+
+    /**
+     * Remove child element(s).
+     * Return first element if not deleted
+     * @param name Optional name of the child
+     * @param delObj True to delete the object
+     * @param single Single / all removal
+     * @param ns Optional child namespace
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag.
+     *  This parameter is ignored if name is 0 or ns is not 0
+     * @return XmlElement pointer if found and not deleted, NULL otherwise
+     */
+    inline XmlElement* removeElement(const String* name = 0, bool delObj = true,
+	bool single = true, const String* ns = 0, bool noPrefix = true)
+	{ return m_children.removeElement(name,delObj,single,ns,noPrefix); }
+
+    /**
+     * Remove child element(s).
+     * Return first element if not deleted
+     * @param path Path used to match the element
+     * @param delObj True to delete the object
+     * @param single Single / all removal
+     * @param clearEmptyPathDepth Depth to clear empty parent element(s).
+     *  0: none, negative: clear all empty parent(s) in path to root
+     * @return XmlElement pointer if found and not deleted, NULL otherwise
+     */
+    XmlElement* removeElement(const XPath& path, bool delObj = true, bool single = true,
+	int clearEmptyPathDepth = 0);
 
     /**
      * Notification for this element that is complete
@@ -2047,6 +2255,62 @@ public:
      */
     static void xml2param(NamedList& list, XmlElement* parent, const String* tag,
 	bool copyXml = false);
+
+    /**
+     * Retrieve an XML element from NamedPointer
+     * @param obj Object to check
+     * @param npOwner Optional pointer to data to be filled with NamedPointer owning the element
+     * @param copy Set it to true to return a copy of the element
+     * @param take True to take the element, false to leave it in NamedPointer carrying it.
+     *  This parameter is ignored if copy is requested or 'npOwner' is given
+     * @return XmlElement pointer, NULL if missing.
+     *  If 'npOwner' is given and set on return the returned pointer is owned by it.
+     *  If 'npOwner' is not given or not set on return the returned pointer is owned by the caller.
+     */
+    static inline XmlElement* getNamedPtr(const GenObject* obj, NamedPointer** npOwner = 0,
+	bool copy = false, bool take = true) {
+	    NamedPointer* np = YOBJECT(NamedPointer,obj);
+	    if (!np)
+		return 0;
+	    XmlElement* xml = YOBJECT(XmlElement,np);
+	    if (!xml)
+		return 0;
+	    if (copy)
+		return new XmlElement(*xml);
+	    if (npOwner)
+		*npOwner = np;
+	    else if (take)
+		np->takeData();
+	    return xml;
+	}
+
+    /**
+     * Retrieve an XML element from GenObject
+     * @param obj Object to check
+     * @param copy Set it to true to return a copy of the element
+     * @return XmlElement pointer, NULL if obj is not an XmlElement
+     */
+    static inline XmlElement* get(const GenObject* obj, bool copy = false) {
+	    XmlElement* xml = YOBJECT(XmlElement,obj);
+	    return xml && copy ? new XmlElement(*xml) : xml;
+	}
+
+    /**
+     * Dump path until element
+     * @param buf Destination buffer
+     * @param xml Element to process
+     * @param depth Path depth.
+     *  Negative: the number of parent element(s) to dump
+     *  Positive: the number of parent element(s) to skip
+     * @param includeTag Include element's tag
+     * @param sep Path separator
+     * @param stop Pointer to XmlElement to stop building path
+     * @param includeStop Include stop element in path
+     * @return Destination buffer reference
+     */
+    static String& dumpPath(String& buf, const XmlElement* xml, int depth = 0,
+	bool includeTag = true, const char* sep = "/",
+	const XmlElement* stop = 0, bool includeStop = true);
 
     /**
      * Default namespace attribute name
