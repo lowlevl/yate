@@ -2947,7 +2947,7 @@ public:
      */
     bool extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context,
 	ExpOperVector& arguments, unsigned int minArgc, int checkValid = -1, int maxArgc = -1)
-	{ return extractArgs(this,stack,oper,context,arguments,minArgc,maxArgc,checkValid); }
+	{ return extractArgs(this,stack,oper,context,arguments,minArgc,checkValid,maxArgc); }
 
     /**
      * Create an empty function call context
@@ -3981,6 +3981,22 @@ public:
 		return (buf = "");
 	    return buf.assign(*oper);
 	}
+
+    /**
+     * Check if an operation is missing
+     * @param oper Operation to check
+     * @return 'oper' if non NULL or null or undefined, NULL otherwise
+     */
+    static inline ExpOperation* getPresent(ExpOperation* oper)
+	{ return isMissing(oper) ? 0 : oper; }
+
+    /**
+     * Check if an operation is missing
+     * @param oper Operation to check
+     * @return 'oper' if non NULL or null or undefined, NULL otherwise
+     */
+    static inline const ExpOperation* getPresent(const ExpOperation* oper)
+	{ return isMissing(oper) ? 0 : oper; }
 
 private:
     String m_basePath;

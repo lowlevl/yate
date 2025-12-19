@@ -1270,12 +1270,13 @@ bool JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& op
     if (!obj)
 	return false;
     obj->extractArgs(stack,oper,context,arguments);
-    if (minArgc > arguments.length()
-	|| (maxArgc >= 0 && maxArgc > (int)minArgc && maxArgc > (int)arguments.length()))
+    if (minArgc > arguments.length() || (maxArgc >= (int)minArgc && maxArgc < (int)arguments.length()))
 	return false;
     if (checkValid) {
 	if (checkValid < 0)
 	    checkValid = minArgc;
+	else if (checkValid > (int)arguments.length())
+	    return false;
 	for (int i = 0; i < checkValid; ++i)
 	    if (!arguments[i])
 		return false;
