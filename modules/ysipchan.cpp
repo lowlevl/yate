@@ -5303,7 +5303,7 @@ bool YateSIPEngine::copyAuthParams(NamedList* dest, const NamedList& src, bool o
 	if (s->name().startsWith("sip_"))
 	    continue;
 	if (!s->name().startsWith("authfail_")) {
-	    if (!s_exclude.matches(s->name()))
+	    if (ok && !s_exclude.matches(s->name()))
 		dest->setParam(s->name(),*s);
 	}
 	else if (!ok && !s_excludeFail.matches(s->name()))
