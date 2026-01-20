@@ -5297,17 +5297,19 @@ bool YateSIPEngine::copyAuthParams(NamedList* dest, const NamedList& src, bool o
 #undef SIP_CP_AUTH_EXCLUDE
     if (!dest)
 	return ok;
+    const Regexp& exclude = ok ? s_exclude : s_excludeFail;
     for (ObjList* o = src.paramList()->skipNull(); o; o = o->skipNext()) {
 	NamedString* s = static_cast<NamedString*>(o->get());
 	// Don't copy added SIP headers: on success they will be added again
 	if (s->name().startsWith("sip_"))
 	    continue;
-	if (!s->name().startsWith("authfail_")) {
-	    if (!s_exclude.matches(s->name()))
-		dest->setParam(s->name(),*s);
-	}
-	else if (!ok && !s_excludeFail.matches(s->name()))
-	    dest->setParam(String(s->name().c_str() + 9),*s);
+	bool fail = s->name().startsWith("authfail_");
+	if (fail == ok || exclude.matches(s->name()))
+	    continue;
+	if (fail)
+	    dest->setParam(s->name().c_str() + 9,*s);
+	else
+	    dest->setParam(s->name(),*s);
     }
     return ok;
 }
